@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Session Sync",
+    "description": "Back up, restore, and synchronize DSH session archives across devices with your own Git repository."
+  }
+}

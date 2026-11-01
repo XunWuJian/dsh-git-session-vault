@@ -1,0 +1,75 @@
+{
+  "name": "dsh-session-sync",
+  "version": "0.1.0",
+  "description": "DSH 会话 Git 同步 — 用你自己的 Git 仓库备份、恢复并在多台设备之间同步 DeepSeek Harness 会话记录。 / DSH Session Git Sync — back up, restore, and synchronize DeepSeek Harness session archives across devices with your own Git repository.",
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "session",
+    "sessions",
+    "git",
+    "sync",
+    "backup",
+    "restore"
+  ],
+  "license": "MIT",
+  "author": "XunWuJian",
+  "type": "module",
+  "main": "lib/index.js",
+  "icon": "./assets/icon.png",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "npm run build:host && npm run build:client",
+    "build:host": "node scripts/build.mjs",
+    "build:client": "node scripts/build-client.mjs",
+    "test": "node --test tests/sync.test.mjs && node tests/smoke.mjs",
+    "clean": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\"",
+    "prepack": "npm run clean && npm run build"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-theme"
+      ]
+    }
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./assets/icon.png",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "assets/icon.png",
+    "locale",
+    "cordis.patch.yml",
+    "README.md",
+    "README_EN.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/XunWuJian/dsh-session-sync.git"
+  },
+  "homepage": "https://github.com/XunWuJian/dsh-session-sync#readme",
+  "bugs": {
+    "url": "https://github.com/XunWuJian/dsh-session-sync/issues"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

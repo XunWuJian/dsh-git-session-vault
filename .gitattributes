@@ -1,0 +1,8 @@
+# Normalize every text file to LF so the published bundle is identical on
+# Windows, macOS and Linux. Without this, Git would rewrite line endings on
+# checkout and the shipped `lib/` would differ from what was tested.
+* text=auto eol=lf
+
+# Session logs handled by the plugin are binary; keep Git out of them.
+*.zstd binary
+*.png binary
