@@ -4,14 +4,14 @@
  */
 
 /** npm package name; also the Cordis plugin name and the bundle row id. */
-export const PACKAGE_NAME = 'dsh-session-vault';
+export const PACKAGE_NAME = 'dsh-git-session-vault';
 
 /** Display name, Chinese / English. */
 export const TITLE_ZH = '会话保险库';
 export const TITLE_EN = 'Session Vault';
 
-/** Data directory under the DSH home: `$DSH_HOME/dsh-session-vault/`. */
-export const APP_DIR_NAME = 'dsh-session-vault';
+/** Data directory under the DSH home: `$DSH_HOME/dsh-git-session-vault/`. */
+export const APP_DIR_NAME = 'dsh-git-session-vault';
 
 /** Backup schema written into the repository; a newer version is refused. */
 export const SCHEMA_VERSION = 1;

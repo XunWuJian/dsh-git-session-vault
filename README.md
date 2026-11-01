@@ -18,13 +18,13 @@ DSH 把每条会话存成 `DSH_HOME/sessions/<工作区>/<会话 id>/session.v4.
 
 ```powershell
 # 在 DSH 配置目录里安装（二选一）
-dsh plugin add dsh-session-vault
+dsh plugin add dsh-git-session-vault
 ```
 
 或者装进某个 profile：
 
 ```powershell
-dsh plugin add dsh-session-vault --profile web
+dsh plugin add dsh-git-session-vault --profile web
 ```
 
 装好后打开 **设置 → 会话保险库**。
@@ -32,8 +32,8 @@ dsh plugin add dsh-session-vault --profile web
 ### 从源码安装
 
 ```powershell
-git clone https://github.com/XunWuJian/dsh-session-vault.git
-cd dsh-session-vault
+git clone https://github.com/XunWuJian/dsh-git-session-vault.git
+cd dsh-git-session-vault
 pnpm install
 pnpm run build
 dsh plugin add .

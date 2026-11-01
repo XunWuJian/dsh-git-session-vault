@@ -1,7 +1,7 @@
 # 更新日志 · Changelog
 
-本文件记录 dsh-session-vault 的所有重要变更。
-All notable changes to dsh-session-vault are documented here.
+本文件记录 dsh-git-session-vault 的所有重要变更。
+All notable changes to dsh-git-session-vault are documented here.
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。

@@ -12,7 +12,7 @@
 import * as React from 'react';
 
 /** Route prefix registered by the host half (absolute, `/api` channel included). */
-const PREFIX = '/api/dsh-session-vault';
+const PREFIX = '/api/dsh-git-session-vault';
 /** One request may wait this long before it is reported as a timeout. */
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -165,7 +165,7 @@ const en = {
     historyTitle: 'Commit history',
 };
 
-const NS = 'dsh-session-vault';
+const NS = 'dsh-git-session-vault';
 
 /** Fill `{name}` placeholders in a dictionary string. */
 function format(template, values) {
@@ -824,7 +824,7 @@ class SectionBoundary extends React.Component {
     }
 
     componentDidCatch(error) {
-        console.error('[dsh-session-vault] settings section crashed:', error);
+        console.error('[dsh-git-session-vault] settings section crashed:', error);
     }
 
     render() {
@@ -843,11 +843,11 @@ const inject = ['slots', 'locale', 'theme'];
 function apply(ctx) {
     let t;
     try {
-        ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-session-vault: locale dictionaries');
+        ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-git-session-vault: locale dictionaries');
         t = createTranslate(ctx.locale.bind(NS));
     }
     catch (error) {
-        console.warn('[dsh-session-vault] locale service unavailable, using browser language:', error);
+        console.warn('[dsh-git-session-vault] locale service unavailable, using browser language:', error);
         t = fallbackTranslate();
     }
     try {
@@ -862,7 +862,7 @@ function apply(ctx) {
         }, Section));
     }
     catch (error) {
-        console.warn('[dsh-session-vault] settings section registration failed; the rest of Settings is unaffected:', error);
+        console.warn('[dsh-git-session-vault] settings section registration failed; the rest of Settings is unaffected:', error);
     }
 }
 

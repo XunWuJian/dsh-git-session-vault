@@ -17,13 +17,13 @@ This plugin puts those files into a Git repository so several devices converge o
 ## Install
 
 ```powershell
-dsh plugin add dsh-session-vault
+dsh plugin add dsh-git-session-vault
 ```
 
 Or into a specific profile:
 
 ```powershell
-dsh plugin add dsh-session-vault --profile web
+dsh plugin add dsh-git-session-vault --profile web
 ```
 
 Then open **Settings → Session Vault**.
@@ -31,8 +31,8 @@ Then open **Settings → Session Vault**.
 ### From source
 
 ```powershell
-git clone https://github.com/XunWuJian/dsh-session-vault.git
-cd dsh-session-vault
+git clone https://github.com/XunWuJian/dsh-git-session-vault.git
+cd dsh-git-session-vault
 pnpm install
 pnpm run build
 dsh plugin add .

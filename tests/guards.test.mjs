@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MERGE_KINDS, classifyPath, forkFileName, isForkFile, planMerge } from '../src/merge.js';
-import { ALLOWED_VERBS, assertSafeGitArgs } from '../src/git.js';
+import { ALLOWED_VERBS, assertSafeGitArgs, gitVersion } from '../src/git.js';
 import { redactText, sanitizeRepoUrl } from '../src/util.js';
 
 const bytes = value => Buffer.from(value);
@@ -98,6 +98,15 @@ test('the git guard refuses force pushes and history rewrites', () => {
     assertSafeGitArgs(['merge', '--ff-only', 'origin/main']);
     assertSafeGitArgs(['checkout', '-q', '-B', 'main', 'origin/main']);
     assertSafeGitArgs(['push', 'origin', 'HEAD:refs/heads/main']);
+    // A read-only capability probe is not a repository action.
+    assertSafeGitArgs(['--version']);
+});
+
+test('the version probe still works through the guarded runner', async () => {
+    // A whitelist that also rejects `--version` would silently disable every
+    // git-dependent feature, so the probe is asserted directly.
+    const version = await gitVersion();
+    assert.match(String(version), /^git version \d+\./u, 'git --version runs through the guard');
 });
 
 test('redaction covers token shapes, URL userinfo and key=value secrets', () => {

@@ -76,7 +76,7 @@ const ctx = {
 };
 
 const plugin = await import('../lib/index.js');
-assert.equal(plugin.name, 'dsh-session-vault', 'plugin name matches the package name');
+assert.equal(plugin.name, 'dsh-git-session-vault', 'plugin name matches the package name');
 assert.deepEqual(plugin.inject, [], 'no hard service dependency');
 plugin.apply(ctx);
 
@@ -85,8 +85,8 @@ await new Promise(resolve => setTimeout(resolve, 1500));
 
 const routeNames = [...routes.keys()].sort();
 assert.ok(routeNames.length > 0, 'HTTP routes were registered');
-assert.ok(routeNames.includes('/api/dsh-session-vault/status'), 'the status route exists');
-assert.ok(routeNames.includes('/api/dsh-session-vault/sync'), 'the sync route exists');
+assert.ok(routeNames.includes('/api/dsh-git-session-vault/status'), 'the status route exists');
+assert.ok(routeNames.includes('/api/dsh-git-session-vault/sync'), 'the sync route exists');
 
 const toolNames = tools.map(tool => tool.name).sort();
 assert.ok(toolNames.includes('dsh_session_sync_status'), 'the status tool exists');
@@ -94,8 +94,8 @@ assert.ok(toolNames.includes('dsh_session_sync_diff'), 'the diff tool exists');
 assert.ok(toolNames.includes('dsh_session_sync_sync'), 'the sync tool exists');
 
 // Exercise one route end to end through its registered handler.
-const statusRoute = routes.get('/api/dsh-session-vault/status');
-const response = await statusRoute.fetch(new Request('http://localhost/api/dsh-session-vault/status', {
+const statusRoute = routes.get('/api/dsh-git-session-vault/status');
+const response = await statusRoute.fetch(new Request('http://localhost/api/dsh-git-session-vault/status', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: '{}',
