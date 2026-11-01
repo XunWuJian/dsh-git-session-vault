@@ -1,16 +1,81 @@
 /**
  * Git process runner.
  *
- * Every Git invocation goes through here so that three invariants hold
- * everywhere: arguments are passed as an array (no shell, so a repository URL
- * cannot inject a command), prompts are disabled (an operation never blocks
- * waiting for a password), and credentials in remote URLs are stripped from
- * captured output before it reaches a log or the browser.
+ * Every Git invocation goes through here so that these invariants hold
+ * everywhere:
+ *
+ * - arguments are passed as an array (no shell, so a repository URL cannot
+ *   inject a command);
+ * - the verb is on a whitelist and destructive flags are refused *at runtime*,
+ *   so a future edit cannot quietly introduce a force push or a hard reset;
+ * - prompts are disabled (an operation never blocks waiting for a password);
+ * - credentials in remote URLs are stripped from captured output before it
+ *   reaches a log or the browser.
  * @module git
  */
 import { spawn } from 'node:child_process';
 import { MAX_GIT_OUTPUT_BYTES } from './constants.js';
 import { SyncError, errorMessage, redactText, sanitizeRepoUrl } from './util.js';
+
+/**
+ * Verbs this plugin may run.
+ *
+ * Deliberately absent: `reset`, `clean`, `rebase`, `rm`, `filter-branch`,
+ * `gc`, `prune`. None of them is needed to move session bytes, and each can
+ * destroy history or working-tree state.
+ */
+export const ALLOWED_VERBS = new Set([
+    'init',
+    'config',
+    'remote',
+    'add',
+    'commit',
+    'push',
+    'fetch',
+    'merge',
+    'merge-base',
+    'rev-parse',
+    'log',
+    'diff',
+    'cat-file',
+    'show',
+    'checkout',
+    'ls-files',
+    'ls-tree',
+    'ls-remote',
+    'status',
+    'hash-object',
+    'rev-list',
+]);
+
+/** Flags that would let a command rewrite or discard history. */
+const FORBIDDEN_PUSH_FLAGS = new Set(['-f', '--force', '--force-with-lease', '--mirror', '--prune-tags', '--delete']);
+
+/** Reject one command that is not a safe primitive. */
+export function assertSafeGitArgs(args) {
+    const verb = args[0] ?? '';
+    if (!ALLOWED_VERBS.has(verb)) {
+        throw new SyncError('git-refused', `禁止的 git 子命令 / forbidden git verb: ${JSON.stringify(verb)}`);
+    }
+    for (const arg of args.slice(1)) {
+        if (verb === 'push' && (FORBIDDEN_PUSH_FLAGS.has(arg) || arg.startsWith('+') || arg.startsWith('--force'))) {
+            throw new SyncError('git-refused', `禁止强推 / refusing to force-push: ${JSON.stringify(arg)}`);
+        }
+        if (arg === '--hard' || arg === '--force') {
+            throw new SyncError('git-refused', `禁止的破坏性参数 / destructive flag refused: ${JSON.stringify(arg)}`);
+        }
+    }
+    if (verb === 'commit' && args.includes('--amend')) {
+        throw new SyncError('git-refused', '禁止改写历史 / git commit --amend is refused (history is append-only)');
+    }
+    if (verb === 'checkout' && !args.includes('--ours') && !args.includes('--theirs') &&
+        !args.some(arg => arg === '-b' || arg === '-B')) {
+        throw new SyncError('git-refused', 'checkout 仅允许 --ours/--theirs 或新建分支 / checkout is only allowed for explicit paths or a new branch');
+    }
+    if (verb === 'merge' && !args.includes('--no-commit') && !args.includes('--abort') && !args.includes('--ff-only')) {
+        throw new SyncError('git-refused', 'merge 必须显式声明策略 / merge requires --no-commit, --abort or --ff-only');
+    }
+}
 
 /** Environment overrides that make Git deterministic and non-interactive. */
 function gitEnvironment(token) {
@@ -45,6 +110,15 @@ function gitEnvironment(token) {
  */
 export function runGit(args, options = {}) {
     return new Promise((resolve, reject) => {
+        // Runtime guard, not a comment: a caller that invents a destructive
+        // command fails here instead of damaging the user's repository.
+        try {
+            assertSafeGitArgs(args);
+        }
+        catch (error) {
+            reject(error);
+            return;
+        }
         let child;
         try {
             child = spawn('git', args, {

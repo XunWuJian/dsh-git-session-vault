@@ -40,17 +40,54 @@ export function toSyncError(error) {
 }
 
 /**
+ * Credential-shaped strings that must never reach a log, the state file or a
+ * browser. The list is deliberately broad: a false positive only redacts text,
+ * while a miss leaks a live secret into a file the user may share.
+ */
+const TOKEN_PATTERN = /\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{16,}|npm_[A-Za-z0-9]{30,}|xox[baprs]-[A-Za-z0-9-]{8,}|AKIA[0-9A-Z]{12,}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._~+/=-]{8,})/giu;
+
+/** `key=value` style secrets (the value is what gets masked). */
+const CREDENTIAL_ASSIGNMENT = /\b((?:api[_-]?key|access[_-]?token|auth[_-]?token|refresh[_-]?token|token|password|passwd|client[_-]?secret|private[_-]?key|authorization)\s*[=:]\s*)([^\s&;,]+)/giu;
+
+/** `user:password@host` inside any URL, including inside Git's own output. */
+const URL_USERINFO = /(\/\/)[^/\s:@]+:[^/\s@]+@/gu;
+
+/**
+ * Whether a URL's user name is itself the credential.
+ *
+ * `https://<token>@host/repo` is the most common way to paste a PAT, and there
+ * the user name *is* the secret, so "a user name is not a secret" does not hold.
+ */
+function usernameIsCredential(username) {
+    if (username === '')
+        return false;
+    if (redactText(username) !== username)
+        return true;
+    if (/^[A-Fa-f0-9]{16,}$/u.test(username))
+        return true;
+    if (username.length >= 20 && !/[-_.]/u.test(username)) {
+        const classes = [/[a-z]/u, /[A-Z]/u, /[0-9]/u].filter(pattern => pattern.test(username)).length;
+        if (classes >= 2)
+            return true;
+    }
+    return false;
+}
+
+/**
  * Strip credentials and home paths out of text before it is logged, stored in
- * state, or returned to a browser: `user:token@host` in URLs and absolute home
- * directories must never leave the machine.
+ * state, or returned to a browser: tokens of every common shape,
+ * `user:token@host` URL userinfo and absolute home directories must never leave
+ * the machine.
  */
 export function redactText(text) {
     let out = String(text);
-    out = out.replace(/\/\/[^/@\s]+@/g, '//***@');
+    out = out.replace(TOKEN_PATTERN, '***');
+    out = out.replace(URL_USERINFO, '$1***@');
+    out = out.replace(/(\/\/)([^/\s@:]+)@/gu, (match, prefix, user) => (usernameIsCredential(user) ? `${prefix}***@` : match));
+    out = out.replace(CREDENTIAL_ASSIGNMENT, '$1***');
     const home = homedir();
     if (home !== '')
         out = out.split(home).join('~');
-    out = out.replace(/((?:token|password|passwd|secret|apikey|api_key|authorization)\s*[=:]\s*)\S+/gi, '$1***');
     return out;
 }
 

@@ -18,6 +18,8 @@ All notable changes to dsh-session-vault are documented here.
   Repository layout storing DSH session files unchanged, with an index and a self-describing schema.
 - **冲突保护**：两边都改动时停止并列出冲突会话，用户逐条选择「保留本地」或「保留远端」后再同步。
   Conflict protection: stop and list both-sides-changed sessions, resolved per session before syncing.
+- **append-only 合并**：会话日志只增不改，因此两边各自追加时不再打断用户——本地日志留在原位，远端内容另存为 `<文件>.remote-fork-<UTC 时间戳>-<设备>`，两条线都完整保留。真正分歧（重写、重新压缩、单侧删除）仍然停下来询问。
+  Append-only merge: when both sides merely appended, the local log stays in place and the remote lineage is preserved as a fork file instead of interrupting the user. A real divergence still asks.
 - **覆盖前备份**：被替换的本地文件先复制到插件数据目录的 `backups/<时间戳>/`。
   Local logs are copied into `backups/<timestamp>/` before being replaced.
 - **上传/下载开关**：可单独允许或禁止某个方向，`backup` 与 `restore` 提供单向操作。
@@ -39,10 +41,19 @@ All notable changes to dsh-session-vault are documented here.
   Repository-relative paths are validated; absolute and `..` paths are refused.
 - 日志中的仓库地址经过凭据脱敏。
   Repository URLs are redacted in logs.
+- **Git 动词白名单**：只允许搬运会话所需的子命令；`push --force`、`reset`、`clean`、`rebase`、`commit --amend` 与隐式切换分支的 `checkout` 在运行时被拒绝，未来改动也无法悄悄引入。
+  A runtime Git verb whitelist refuses force pushes, `reset`, `clean`, `rebase`, `commit --amend` and branch-switching `checkout`.
+- **更广的脱敏**：GitHub PAT（含 `github_pat_` 新形态）、`sk-`、`glpat-`、`npm_`、`AKIA`、`AIza`、JWT、`Bearer` 头，以及「用户名位置就是令牌」的 `https://<token>@host` 写法。
+  Broader redaction: GitHub PATs (including the fine-grained form), `sk-`, `glpat-`, `npm_`, `AKIA`, `AIza`, JWTs, `Bearer` headers, and the PAT-in-username URL form.
+
+### 修复 / Fixed
+
+- 操作结束时写入结果会覆盖同一操作刚保存的基线，导致下一轮同步把普通追加误判为冲突。现在记录结果前会重新读取状态。
+  Recording an operation outcome could overwrite the baselines that same operation had just saved, making the next sync misread an ordinary append as a conflict.
 
 ### 已知限制 / Known limitations
 
 - Git 历史会持续增长：会话日志是整文件快照，仓库体积随时间上升。
   Git history grows: session logs are whole-file snapshots, so the repository keeps growing.
-- 会话 id 冲突时不会尝试合并内容，只提供保留某一边。
-  Conflicting session ids are never merged; only picking a side is offered.
+- 真实分歧（重写、重新压缩、单侧删除）不会自动合并，只提供保留某一边或保留 fork。
+  A genuine divergence is never auto-merged; only keeping a side (or the fork) is offered.

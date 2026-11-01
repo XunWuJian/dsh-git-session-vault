@@ -14,11 +14,11 @@ import { watch } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PACKAGE_NAME, TITLE_EN, TITLE_ZH, IDLE_SESSION_MS } from './constants.js';
+import { PACKAGE_NAME, TITLE_EN, TITLE_ZH, IDLE_SESSION_MS, DEFAULT_BRANCH } from './constants.js';
 import { createEngine } from './engine.js';
 import { gitVersion } from './git.js';
 import { registerHttpRoutes } from './routes.js';
-import { resolvePaths, loadConfig, loadState } from './store.js';
+import { resolvePaths, loadConfig, loadState, normalizeConfig, saveConfig } from './store.js';
 import { registerTools } from './tools.js';
 import { createLogger, displayPath, ensurePrivateDir, errorMessage } from './util.js';
 
@@ -195,8 +195,119 @@ function createAutoSync(ctx, engine, logger) {
     };
 }
 
+/**
+ * A tiny schema builder.
+ *
+ * The host's `@deepseek-ai/schemastery` is not a runtime dependency of this
+ * plugin on purpose: importing it would make the plugin unresolvable from a
+ * profile's `node_modules` and the whole plugin would fail to load. Cordis only
+ * needs an object that can validate and default a config value, which is what
+ * these few methods provide.
+ */
+function field(kind, fallback, allowed) {
+    const schema = {
+        type: kind,
+        default: fallback,
+        /** Accept a value or fall back to the default. */
+        parse(value) {
+            if (value === undefined || value === null)
+                return fallback;
+            if (kind === 'string')
+                return typeof value === 'string' ? value : fallback;
+            if (kind === 'number')
+                return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+            if (kind === 'boolean')
+                return typeof value === 'boolean' ? value : fallback;
+            if (kind === 'union')
+                return allowed.includes(value) ? value : fallback;
+            return value;
+        },
+        /** Minimal JSON Schema projection for the loader's inspector. */
+        toJSON() {
+            return kind === 'union'
+                ? { type: 'string', enum: [...allowed], default: fallback }
+                : { type: kind, default: fallback };
+        },
+    };
+    return schema;
+}
+
+/** Nested object schema. */
+function objectSchema(shape) {
+    const defaults = {};
+    for (const [key, schema] of Object.entries(shape))
+        defaults[key] = schema.default;
+    return {
+        type: 'object',
+        default: defaults,
+        parse(value) {
+            const source = value !== null && typeof value === 'object' ? value : {};
+            const out = {};
+            for (const [key, schema] of Object.entries(shape))
+                out[key] = schema.parse(source[key]);
+            return out;
+        },
+        toJSON() {
+            const properties = {};
+            for (const [key, schema] of Object.entries(shape))
+                properties[key] = schema.toJSON();
+            return { type: 'object', properties, default: defaults };
+        },
+    };
+}
+
+/**
+ * Declared configuration.
+ *
+ * Cordis validates the `config:` block of a profile patch against this schema
+ * and passes the result to `apply(ctx, config)`. Values left out fall back to
+ * whatever the settings page last saved, so a profile patch and the Web UI can
+ * both configure the plugin.
+ */
+export const Config = objectSchema({
+    repoUrl: field('string', ''),
+    branch: field('string', DEFAULT_BRANCH),
+    backupDir: field('string', ''),
+    authMode: field('union', 'credential-helper', ['credential-helper', 'https-token']),
+    tokenEnvVar: field('string', ''),
+    username: field('string', ''),
+    includeSubagentSessions: field('boolean', true),
+    pushEnabled: field('boolean', true),
+    pullEnabled: field('boolean', true),
+    allowOverwrite: field('boolean', false),
+    maxSessionMb: field('number', 200),
+    autoSync: objectSchema({
+        enabled: field('boolean', true),
+        onStartup: field('boolean', false),
+        onSessionChange: field('boolean', false),
+        startupDelayMs: field('number', 25_000),
+        debounceMs: field('number', 30_000),
+    }),
+});
+
+/**
+ * Merge a profile-patch configuration over the stored one.
+ *
+ * The patch wins where it says something, the saved file fills the rest. This
+ * keeps a hand-written patch authoritative without wiping settings the user
+ * made in the browser.
+ */
+function mergeConfig(patch, stored, deviceName) {
+    const merged = { ...stored };
+    for (const [key, value] of Object.entries(patch ?? {})) {
+        if (value === undefined || value === null)
+            continue;
+        if (key === 'autoSync' && typeof value === 'object') {
+            merged.autoSync = { ...(stored?.autoSync ?? {}), ...value };
+            continue;
+        }
+        merged[key] = value;
+    }
+    return normalizeConfig(merged, deviceName);
+}
+
 /** Plugin entry point. */
-export function apply(ctx) {
+export function apply(ctx, config = {}) {
     let running = null;
     let disposed = false;
     const disposers = [];
@@ -211,6 +322,26 @@ export function apply(ctx) {
         await ensurePrivateDir(paths.dataDir);
         await ensurePrivateDir(paths.workRoot);
         await ensurePrivateDir(paths.backupRoot);
+
+        // A profile patch is configuration, not a secret store: apply it once at
+        // startup so the Web UI and the agent tools see the same values.
+        if (config !== null && typeof config === 'object' && Object.keys(config).length > 0) {
+            try {
+                const stored = await loadConfig(paths);
+                const effective = mergeConfig(config, stored, process.env.COMPUTERNAME ?? 'DSH device');
+                if (effective.repoUrl !== stored.repoUrl || effective.branch !== stored.branch) {
+                    await saveConfig(paths, effective);
+                    logger.info('已应用 profile 配置 / profile configuration applied', {
+                        repo: effective.repoUrl === '' ? '(none)' : 'configured',
+                        branch: effective.branch,
+                    });
+                }
+            }
+            catch (error) {
+                logger.warn(`profile 配置无效，已忽略 / profile configuration ignored: ${errorMessage(error)}`);
+            }
+        }
+
         const engine = createEngine({
             dshHome,
             workDir: join(paths.workRoot, 'repo'),

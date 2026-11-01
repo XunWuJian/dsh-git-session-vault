@@ -26,7 +26,7 @@
     "build": "npm run build:host && npm run build:client",
     "build:host": "node scripts/build.mjs",
     "build:client": "node scripts/build-client.mjs",
-    "test": "node --test tests/sync.test.mjs && node tests/smoke.mjs",
+    "test": "node --test tests/guards.test.mjs && node --test tests/sync.test.mjs && node tests/smoke.mjs",
     "clean": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\"",
     "prepack": "npm run clean && npm run build"
   },

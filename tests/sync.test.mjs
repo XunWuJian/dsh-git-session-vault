@@ -126,6 +126,45 @@ test('two devices: push, pull, skip, conflict and protection', async t => {
     assert.equal(await deviceB.read('session-2'), 'beta-v2');
 });
 
+test('two devices appending to one session keep both lineages', async t => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-session-vault-')));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const bare = join(root, 'origin.git');
+    await run('git', ['init', '--bare', '-q', bare]);
+
+    // Both devices start from the same agreed log.
+    const shared = 'turn-1\n';
+    const deviceA = await makeDevice(root, 'device-a', [{ id: 'session-1', content: shared }], bare);
+    await deviceA.engine.sync();
+    const deviceB = await makeDevice(root, 'device-b', [], bare);
+    await deviceB.engine.restore();
+    assert.equal(await deviceB.read('session-1'), shared, 'device B starts from the same log');
+
+    // Each device appends its own turn, so both sides changed but neither
+    // rewrote the other's bytes.
+    await deviceA.write('session-1', `${shared}turn-2-from-a\n`);
+    const pushed = await deviceA.engine.sync();
+    assert.equal(pushed.counts.push, 1, 'device A uploads its append');
+
+    await deviceB.write('session-1', `${shared}turn-3-from-b\n`);
+    const merged = await deviceB.engine.sync();
+
+    // The append is recognized as such: no interruption, both files survive.
+    assert.equal(merged.counts.conflict, 0, 'an append is not a conflict');
+    assert.equal(merged.counts.fork, 1, 'the remote lineage is forked');
+    assert.equal(merged.forked.length, 1);
+
+    // Device B keeps its own log untouched...
+    assert.equal(await deviceB.read('session-1'), `${shared}turn-3-from-b\n`, 'the local append survives in place');
+
+    // ...and the remote append is preserved beside it, byte for byte.
+    const forkPath = merged.forked[0];
+    const forkAbsolute = join(deviceB.home, 'sessions', WORKSPACE, 'session-1', forkPath.split(/[\\/]/u).pop());
+    const forkContent = await readFile(forkAbsolute, 'utf8');
+    assert.equal(forkContent, `${shared}turn-2-from-a\n`, 'the remote append is preserved in the fork file');
+    assert.match(forkPath, /\.remote-fork-\d{14}-[a-z0-9]+$/u, 'the fork name is stamped and device-tagged');
+});
+
 test('backup only uploads and the repository keeps its own layout', async t => {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-session-vault-')));
     t.after(() => rm(root, { recursive: true, force: true }));
