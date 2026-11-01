@@ -2,12 +2,13 @@
  * Host HTTP routes for the Web settings page.
  *
  * Routes register on the Host connection's authenticated shared channel
- * (`connection.fetch.register`), so they inherit the deployment's host/origin
- * fence instead of inventing a second gate. Every route is POST + JSON and
- * answers with one envelope: `{ ok: true, value }` or `{ ok: false, error }`.
+ * (`connection.registerFetchRoute`), so they inherit the deployment's
+ * host/origin fence instead of inventing a second gate. Every route is
+ * POST + JSON and answers with one envelope: `{ ok: true, value }` or
+ * `{ ok: false, error }`.
  * @module routes
  */
-import { API_PREFIX, LEGACY_API_PREFIX } from './constants.js';
+import { API_PREFIX } from './constants.js';
 import { SyncError, errorMessage, toSyncError } from './util.js';
 
 /** Maximum JSON body accepted by one route. */
@@ -93,7 +94,7 @@ export function registerHttpRoutes(options) {
             logs: async body => options.engine.logs({ limit: Number(body.limit) || 100 }),
             'conflict/clear': async () => options.engine.clearConflict(),
         };
-        const prefixes = [API_PREFIX, LEGACY_API_PREFIX];
+        const prefixes = [API_PREFIX];
         let registered = 0;
         for (const [name, handler] of Object.entries(handlers)) {
             for (const prefix of prefixes) {

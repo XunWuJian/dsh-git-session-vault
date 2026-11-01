@@ -1,5 +1,5 @@
 /**
- * Browser half of DSH Session Sync.
+ * Browser half of DSH Session Vault.
  *
  * Registers one `settings.section` page. Everything it shows comes from the
  * host half over the plugin's own HTTP routes, so this file never touches the
@@ -12,7 +12,7 @@
 import * as React from 'react';
 
 /** Route prefix registered by the host half (absolute, `/api` channel included). */
-const PREFIX = '/api/dsh-session-sync';
+const PREFIX = '/api/dsh-session-vault';
 /** One request may wait this long before it is reported as a timeout. */
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -22,8 +22,8 @@ const REQUEST_TIMEOUT_MS = 30_000;
  * through the locale service when it is available.
  */
 const zh = {
-    nav: '会话同步',
-    title: '会话同步',
+    nav: '会话保险库',
+    title: '会话保险库',
     intro: '用你自己的 Git 仓库备份、恢复并在多台设备之间同步 DSH 的会话记录。仓库必须保持私有 —— 会话文件包含完整对话。',
     loading: '正在加载…',
     retry: '重试',
@@ -94,8 +94,8 @@ const zh = {
 };
 
 const en = {
-    nav: 'Session Sync',
-    title: 'Session Sync',
+    nav: 'Session Vault',
+    title: 'Session Vault',
     intro: 'Back up, restore, and synchronize DSH session archives across devices with your own Git repository. Keep the repository private — session files contain full conversations.',
     loading: 'Loading…',
     retry: 'Retry',
@@ -165,7 +165,7 @@ const en = {
     historyTitle: 'Commit history',
 };
 
-const NS = 'dsh-session-sync';
+const NS = 'dsh-session-vault';
 
 /** Fill `{name}` placeholders in a dictionary string. */
 function format(template, values) {
@@ -824,7 +824,7 @@ class SectionBoundary extends React.Component {
     }
 
     componentDidCatch(error) {
-        console.error('[dsh-session-sync] settings section crashed:', error);
+        console.error('[dsh-session-vault] settings section crashed:', error);
     }
 
     render() {
@@ -843,11 +843,11 @@ const inject = ['slots', 'locale', 'theme'];
 function apply(ctx) {
     let t;
     try {
-        ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-session-sync: locale dictionaries');
+        ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-session-vault: locale dictionaries');
         t = createTranslate(ctx.locale.bind(NS));
     }
     catch (error) {
-        console.warn('[dsh-session-sync] locale service unavailable, using browser language:', error);
+        console.warn('[dsh-session-vault] locale service unavailable, using browser language:', error);
         t = fallbackTranslate();
     }
     try {
@@ -862,7 +862,7 @@ function apply(ctx) {
         }, Section));
     }
     catch (error) {
-        console.warn('[dsh-session-sync] settings section registration failed; the rest of Settings is unaffected:', error);
+        console.warn('[dsh-session-vault] settings section registration failed; the rest of Settings is unaffected:', error);
     }
 }
 

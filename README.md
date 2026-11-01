@@ -1,4 +1,4 @@
-# 会话同步 · DSH Session Sync
+# 会话保险库 · DSH Session Vault
 
 用**你自己的 Git 仓库**备份、恢复并在多台设备之间同步 DeepSeek Harness 的会话记录。
 
@@ -18,22 +18,22 @@ DSH 把每条会话存成 `DSH_HOME/sessions/<工作区>/<会话 id>/session.v4.
 
 ```powershell
 # 在 DSH 配置目录里安装（二选一）
-dsh plugin add dsh-session-sync
+dsh plugin add dsh-session-vault
 ```
 
 或者装进某个 profile：
 
 ```powershell
-dsh plugin add dsh-session-sync --profile web
+dsh plugin add dsh-session-vault --profile web
 ```
 
-装好后打开 **设置 → 会话同步**。
+装好后打开 **设置 → 会话保险库**。
 
 ### 从源码安装
 
 ```powershell
-git clone https://github.com/XunWuJian/dsh-session-sync.git
-cd dsh-session-sync
+git clone https://github.com/XunWuJian/dsh-session-vault.git
+cd dsh-session-vault
 pnpm install
 pnpm run build
 dsh plugin add .
@@ -42,7 +42,7 @@ dsh plugin add .
 ## 快速开始
 
 1. 在 GitHub / Gitee / 自建 Git 服务上**新建一个空的私有仓库**。
-2. 打开 **设置 → 会话同步**，填入仓库地址，例如 `git@github.com:you/private-sessions.git`。
+2. 打开 **设置 → 会话保险库**，填入仓库地址，例如 `git@github.com:you/private-sessions.git`。
 3. 点 **测试连接** 确认能访问。
 4. 点 **同步**。第一次会创建分支、写入备份布局，并把它推上去。
 
@@ -91,7 +91,7 @@ profiles/<工作区>/sessions/<会话 id>/*.zstd   会话原始文件，原样�
 
 ## 界面
 
-**设置 → 会话同步** 提供：
+**设置 → 会话保险库** 提供：
 
 - 仓库地址、分支、设备名、认证方式
 - 状态卡片：本地会话数、工作区数、基线数、上次同步时间、最近提交、最近操作、最近错误

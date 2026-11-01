@@ -71,5 +71,5 @@ draw.polygon(
 )
 
 img = img.resize((256, 256), Image.LANCZOS)
-img.save(r"E:\temp\ds-test\dsh-session-sync\assets\icon.png", "PNG", optimize=True)
+img.save(r"E:\temp\ds-test\dsh-session-vault\assets\icon.png", "PNG", optimize=True)
 print("wrote assets/icon.png", img.size)

@@ -1,7 +1,7 @@
 # 更新日志 · Changelog
 
-本文件记录 dsh-session-sync 的所有重要变更。
-All notable changes to dsh-session-sync are documented here.
+本文件记录 dsh-session-vault 的所有重要变更。
+All notable changes to dsh-session-vault are documented here.
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
@@ -12,7 +12,7 @@ All notable changes to dsh-session-sync are documented here.
 
 ### 新增 / Added
 
-- **三向会话同步**：以内容哈希 `sha256` 作为会话身份，比较 `基线 / 本地 / 远端` 决定上传、下载、跳过或冲突。
+- **三向同步**：以内容哈希 `sha256` 作为会话身份，比较 `基线 / 本地 / 远端` 决定上传、下载、跳过或冲突。
   Three-way sync keyed by `sha256` content identity, comparing `baseline / local / remote`.
 - **Git 仓库备份布局**：`profiles/<工作区>/sessions/<会话 id>/` 原样保存 DSH 会话文件，附带 `manifest.json` 与 `metadata/schema.json`。
   Repository layout storing DSH session files unchanged, with an index and a self-describing schema.

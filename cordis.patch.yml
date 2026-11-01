@@ -1,7 +1,7 @@
-# Bundle patch layer for dsh-session-sync.
+# Bundle patch layer for dsh-session-vault.
 # The row loads the package's main entry as the host half (a Cordis plugin);
 # the `dsh.client` declaration in package.json makes the Web app load
 # ./client as the browser half that registers the settings page.
 - insert:
-    - id: dsh-session-sync
-      name: dsh-session-sync
+    - id: dsh-session-vault
+      name: dsh-session-vault

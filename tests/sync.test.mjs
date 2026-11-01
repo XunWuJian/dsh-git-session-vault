@@ -69,7 +69,7 @@ async function makeDevice(root, name, sessions, bare) {
 }
 
 test('two devices: push, pull, skip, conflict and protection', async t => {
-    const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-session-sync-')));
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-session-vault-')));
     t.after(() => rm(root, { recursive: true, force: true }));
     const bare = join(root, 'origin.git');
     await run('git', ['init', '--bare', '-q', bare]);
@@ -127,7 +127,7 @@ test('two devices: push, pull, skip, conflict and protection', async t => {
 });
 
 test('backup only uploads and the repository keeps its own layout', async t => {
-    const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-session-sync-')));
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-session-vault-')));
     t.after(() => rm(root, { recursive: true, force: true }));
     const bare = join(root, 'origin.git');
     await run('git', ['init', '--bare', '-q', bare]);
@@ -150,7 +150,7 @@ test('backup only uploads and the repository keeps its own layout', async t => {
 });
 
 test('binary session logs survive a round trip byte for byte', async t => {
-    const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-session-sync-')));
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-session-vault-')));
     t.after(() => rm(root, { recursive: true, force: true }));
     const bare = join(root, 'origin.git');
     await run('git', ['init', '--bare', '-q', bare]);
@@ -183,7 +183,7 @@ test('binary session logs survive a round trip byte for byte', async t => {
 });
 
 test('a backup directory outside the repository is rejected', async t => {
-    const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-session-sync-')));
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-session-vault-')));
     t.after(() => rm(root, { recursive: true, force: true }));
     const bare = join(root, 'origin.git');
     await run('git', ['init', '--bare', '-q', bare]);

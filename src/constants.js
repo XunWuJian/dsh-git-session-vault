@@ -4,14 +4,14 @@
  */
 
 /** npm package name; also the Cordis plugin name and the bundle row id. */
-export const PACKAGE_NAME = 'dsh-session-sync';
+export const PACKAGE_NAME = 'dsh-session-vault';
 
 /** Display name, Chinese / English. */
-export const TITLE_ZH = '会话同步';
-export const TITLE_EN = 'Session Sync';
+export const TITLE_ZH = '会话保险库';
+export const TITLE_EN = 'Session Vault';
 
-/** Data directory under the DSH home: `$DSH_HOME/dsh-session-sync/`. */
-export const APP_DIR_NAME = 'dsh-session-sync';
+/** Data directory under the DSH home: `$DSH_HOME/dsh-session-vault/`. */
+export const APP_DIR_NAME = 'dsh-session-vault';
 
 /** Backup schema written into the repository; a newer version is refused. */
 export const SCHEMA_VERSION = 1;
@@ -24,9 +24,6 @@ export const SCHEMA_VERSION = 1;
  * channel are part of the registered path itself.
  */
 export const API_PREFIX = `/api/${PACKAGE_NAME}`;
-
-/** Host route prefix used by browser clients of older installs. */
-export const LEGACY_API_PREFIX = '/api/dsh-git-session-sync';
 
 /** Default branch when the user leaves the field empty. */
 export const DEFAULT_BRANCH = 'main';

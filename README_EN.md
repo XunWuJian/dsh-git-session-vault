@@ -1,4 +1,4 @@
-# Session Sync · DSH Session Sync
+# Session Vault · DSH Session Vault
 
 Back up, restore, and synchronize DeepSeek Harness session archives across devices using **your own Git repository**.
 
@@ -17,22 +17,22 @@ This plugin puts those files into a Git repository so several devices converge o
 ## Install
 
 ```powershell
-dsh plugin add dsh-session-sync
+dsh plugin add dsh-session-vault
 ```
 
 Or into a specific profile:
 
 ```powershell
-dsh plugin add dsh-session-sync --profile web
+dsh plugin add dsh-session-vault --profile web
 ```
 
-Then open **Settings → Session Sync**.
+Then open **Settings → Session Vault**.
 
 ### From source
 
 ```powershell
-git clone https://github.com/XunWuJian/dsh-session-sync.git
-cd dsh-session-sync
+git clone https://github.com/XunWuJian/dsh-session-vault.git
+cd dsh-session-vault
 pnpm install
 pnpm run build
 dsh plugin add .
@@ -41,7 +41,7 @@ dsh plugin add .
 ## Quick start
 
 1. Create a **new empty private repository** on GitHub / GitLab / Gitee / your own Git server.
-2. Open **Settings → Session Sync** and enter the URL, e.g. `git@github.com:you/private-sessions.git`.
+2. Open **Settings → Session Vault** and enter the URL, e.g. `git@github.com:you/private-sessions.git`.
 3. Click **Test connection** to confirm access.
 4. Click **Sync**. The first run creates the branch, writes the backup layout, and pushes it.
 
@@ -90,7 +90,7 @@ Session files keep DSH's own format — **no conversion** — so any machine run
 
 ## Settings page
 
-**Settings → Session Sync** provides:
+**Settings → Session Vault** provides:
 
 - Repository URL, branch, device name, authentication mode
 - Status tiles: local sessions, workspaces, baselines, last sync, latest commit, last operation, last error
