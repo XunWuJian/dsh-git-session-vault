@@ -11,8 +11,26 @@
     "sessions",
     "git",
     "sync",
+    "synchronize",
     "backup",
-    "restore"
+    "restore",
+    "vault",
+    "archive",
+    "cross-device",
+    "multi-device",
+    "migration",
+    "会话",
+    "会话备份",
+    "聊天记录",
+    "聊天记录备份",
+    "消息备份",
+    "对话备份",
+    "备份",
+    "恢复",
+    "同步",
+    "换机",
+    "迁移",
+    "多设备"
   ],
   "license": "MIT",
   "author": "XunWuJian",
@@ -20,7 +38,8 @@
   "main": "lib/index.js",
   "icon": "./assets/icon.png",
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=22.19.0",
+    "dsh": ">=0.2.0-rc.1"
   },
   "scripts": {
     "build": "npm run build:host && npm run build:client",
