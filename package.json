@@ -1,6 +1,6 @@
 {
   "name": "dsh-git-session-vault",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "DSH 会话 Git 同步 — 用你自己的 Git 仓库备份、恢复并在多台设备之间同步 DeepSeek Harness 会话记录。 / DSH Session Git Sync — back up, restore, and synchronize DeepSeek Harness session archives across devices with your own Git repository.",
   "keywords": [
     "deepseek",
