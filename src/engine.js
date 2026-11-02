@@ -27,7 +27,7 @@ import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { SCHEMA_VERSION, TITLE_EN, TITLE_ZH } from './constants.js';
 import { MERGE_KINDS, classifyPath, forkFileName, isForkFile } from './merge.js';
-import { readSessionHeaderId, scanSessions, sessionIdMatches } from './sessions.js';
+import { readSessionHeaderId, readableWorkspaceKey, scanSessions, sessionIdMatches } from './sessions.js';
 import { deviceInfo, loadConfig, loadState, normalizeConfig, saveConfig, saveState } from './store.js';
 import { runGit } from './git.js';
 import {
@@ -268,6 +268,9 @@ export function createEngine(options) {
                 sessionId: entry.sessionId,
                 workspaceKey: entry.workspaceKey,
                 workspaceTitle: entry.workspaceTitle,
+                workspacePath: entry.workspacePath ?? null,
+                // The sidebar name; `null` when the host never titled it.
+                title: entry.title ?? null,
                 fileName: entry.fileName,
                 localPath: entry.file,
                 localSize: entry.size,
@@ -411,6 +414,8 @@ export function createEngine(options) {
                 sessionId,
                 workspaceKey: entry.workspaceKey,
                 workspaceTitle: entry.workspaceTitle,
+                workspacePath: entry.workspacePath ?? null,
+                title: entry.title ?? null,
                 fileName: entry.fileName,
                 localSize: entry.localSize,
                 localMtime: entry.localMtime,
@@ -431,6 +436,7 @@ export function createEngine(options) {
                 sessionId,
                 workspaceKey: remoteEntry.workspaceKey,
                 workspaceTitle: null,
+                title: null,
                 fileName: remoteEntry.fileName,
                 localSize: null,
                 localMtime: null,
@@ -981,6 +987,29 @@ export function createEngine(options) {
         return true;
     }
 
+    /**
+     * Project a plan row for the browser.
+     *
+     * `title` is the human name for the session (null when the host never
+     * titled it); `sessionId` stays alongside it because it is the stable
+     * identity, and the UI shows it as the secondary line.
+     */
+    function rowForClient(row) {
+        return {
+            sessionId: row.sessionId,
+            title: row.title ?? null,
+            // The recorded path beats the title for readability when both exist,
+            // because the title is often just the folder's own name.
+            workspace: row.workspacePath ?? row.workspaceTitle ?? readableWorkspaceKey(row.workspaceKey),
+            workspaceKey: row.workspaceKey,
+            action: row.action,
+            reason: row.reason,
+            localSize: row.localSize,
+            remoteSize: row.remoteSize,
+            createdAt: row.createdAt === null ? null : new Date(row.createdAt).toISOString(),
+        };
+    }
+
     return {
         /** The stored configuration. */
         async getConfig() {
@@ -1028,7 +1057,9 @@ export function createEngine(options) {
         async status() {
             const config = await loadConfig(paths);
             const state = await loadState(paths);
-            const local = await scanSessions(dshHome);
+            // Status only needs sizes and workspace grouping; reading every
+            // session title would decompress the whole archive on each poll.
+            const local = await scanSessions(dshHome, { titles: false });
             const allowed = local.filter(entry => workspaceAllowed(config, entry));
             const workspaces = new Map();
             for (const entry of local) {
@@ -1071,7 +1102,8 @@ export function createEngine(options) {
             const entries = await scanSessions(dshHome);
             const sessions = entries.map(entry => ({
                 sessionId: entry.sessionId,
-                workspace: entry.workspaceTitle ?? entry.workspaceKey,
+                title: entry.title ?? null,
+                workspace: entry.workspacePath ?? entry.workspaceTitle ?? readableWorkspaceKey(entry.workspaceKey),
                 workspaceKey: entry.workspaceKey,
                 fileName: entry.fileName,
                 size: entry.size,
@@ -1094,6 +1126,7 @@ export function createEngine(options) {
                 headerId: await readSessionHeaderId(entry.file),
                 workspaceKey: entry.workspaceKey,
                 workspaceTitle: entry.workspaceTitle,
+                workspacePath: entry.workspacePath ?? null,
                 fileName: entry.fileName,
                 size: entry.size,
                 createdAt: new Date(entry.createdAt).toISOString(),
@@ -1118,15 +1151,7 @@ export function createEngine(options) {
                 });
                 return {
                     counts: plan.counts,
-                    rows: plan.rows.map(row => ({
-                        sessionId: row.sessionId,
-                        workspace: row.workspaceTitle ?? row.workspaceKey,
-                        action: row.action,
-                        reason: row.reason,
-                        localSize: row.localSize,
-                        remoteSize: row.remoteSize,
-                        createdAt: row.createdAt === null ? null : new Date(row.createdAt).toISOString(),
-                    })),
+                    rows: plan.rows.map(rowForClient),
                 };
             }
             finally {
@@ -1151,15 +1176,7 @@ export function createEngine(options) {
             return {
                 counts: plan.counts,
                 stale: true,
-                rows: plan.rows.slice(0, 200).map(row => ({
-                    sessionId: row.sessionId,
-                    workspace: row.workspaceTitle ?? row.workspaceKey,
-                    action: row.action,
-                    reason: row.reason,
-                    localSize: row.localSize,
-                    remoteSize: row.remoteSize,
-                    createdAt: row.createdAt === null ? null : new Date(row.createdAt).toISOString(),
-                })),
+                rows: plan.rows.slice(0, 200).map(rowForClient),
             };
         },
 

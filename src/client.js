@@ -66,6 +66,7 @@ const zh = {
     columnSize: '大小',
     columnTime: '更新时间',
     columnAction: '动作',
+    untitled: '未命名会话',
     more: '还有 {count} 个未显示',
     sectionActions: '操作',
     sectionActionsHint: '同步会先拉取安全的新内容，再上传本地新内容；两边都改动时停止并请你决定。',
@@ -147,6 +148,7 @@ const en = {
     columnSize: 'Size',
     columnTime: 'Updated',
     columnAction: 'Action',
+    untitled: 'Untitled session',
     more: '{count} more not shown',
     sectionActions: 'Actions',
     sectionActionsHint: 'A sync pulls safe remote content first, then uploads local content. When both sides changed it stops and asks you.',
@@ -417,6 +419,46 @@ const styles = {
         whiteSpace: 'nowrap',
     },
     td: { padding: '7px 8px', borderBottom: '1px solid var(--dsw-alias-border, rgba(0,0,0,0.06))', verticalAlign: 'top' },
+    /** The human name of a session, the primary line of the session cell. */
+    sessionTitle: {
+        fontSize: '12px',
+        fontWeight: 500,
+        lineHeight: 1.4,
+        // Two lines are enough to recognize a title; a long one must not push
+        // the rest of the row apart.
+        display: '-webkit-box',
+        WebkitLineClamp: 2,
+        WebkitBoxOrient: 'vertical',
+        overflow: 'hidden',
+    },
+    /** The session id, kept as the secondary line under the title. */
+    sessionId: {
+        color: 'var(--dsw-alias-text-secondary, #6b7280)',
+        lineHeight: 1.4,
+        marginTop: '2px',
+        // One line, clipped: a wrapped uuid turns every row into four lines and
+        // pushes the columns that actually matter off screen.
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+    },
+    /** The session cell, kept wide enough for a title to be readable. */
+    sessionCell: { padding: '7px 8px', verticalAlign: 'top', minWidth: '220px' },
+    /** The workspace cell, clipped to one line for the same reason. */
+    workspaceCell: {
+        padding: '7px 8px',
+        verticalAlign: 'top',
+        maxWidth: '150px',
+        fontSize: '11px',
+        color: 'var(--dsw-alias-text-secondary, #6b7280)',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+    },
+    /** A short cell (size, timestamp) that must not wrap mid-value. */
+    nowrapCell: { padding: '7px 8px', verticalAlign: 'top', whiteSpace: 'nowrap' },
+    /** The action pill's cell; its pill must stay on one line. */
+    actionCell: { padding: '7px 8px', verticalAlign: 'top', whiteSpace: 'nowrap' },
     mono: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '11px' },
     notice: { margin: 0, fontSize: '12px', lineHeight: 1.5 },
     ok: { color: 'var(--dsw-alias-success, #15803d)' },
@@ -1126,12 +1168,22 @@ function Page({ t }) {
                             h('th', { style: styles.th }, t('columnSize')))),
                     h('tbody', null,
                         ...diff.rows.slice(0, 200).map(row => h('tr', { key: row.sessionId },
-                            h('td', { style: { ...styles.td, ...styles.mono } }, row.sessionId),
-                            h('td', { style: styles.td }, row.workspace ?? '—'),
-                            h('td', { style: styles.td },
-                                h('span', { style: actionPillStyle(row.action) },
-                                    `${row.action}${row.reason !== undefined && row.reason !== null ? ` · ${row.reason}` : ''}`)),
-                            h('td', { style: styles.td }, formatBytes(row.localSize ?? row.remoteSize ?? 0))))),
+                            // The title is what the sidebar shows; the id stays
+                            // underneath because it is the stable identity and
+                            // the only handle when a session was never titled.
+                            h('td', { style: styles.sessionCell },
+                                h('div', { style: styles.sessionTitle }, row.title ?? t('untitled')),
+                                h('div', { style: { ...styles.mono, ...styles.sessionId } }, row.sessionId)),
+                            h('td', { style: styles.workspaceCell, title: row.workspace ?? '' }, row.workspace ?? '—'),
+                            h('td', { style: styles.actionCell },
+                                // The reason string can be long ("same-id-
+                                // different-content"); the pill carries the
+                                // action and the full text lives in the title.
+                                h('span', {
+                                    style: actionPillStyle(row.action),
+                                    title: row.reason === undefined || row.reason === null ? row.action : `${row.action} · ${row.reason}`,
+                                }, row.action)),
+                            h('td', { style: styles.nowrapCell }, formatBytes(row.localSize ?? row.remoteSize ?? 0))))),
                     diff.rows.length > 200
                         ? h('caption', { style: { ...styles.hint, textAlign: 'left', paddingTop: '8px' } },
                             t('more', { count: diff.rows.length - 200 }))
