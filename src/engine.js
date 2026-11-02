@@ -110,13 +110,18 @@ export function createEngine(options) {
     const env = options.env ?? process.env;
     let queue = Promise.resolve();
     let working = false;
-    /**
-     * Notified after a configuration is persisted.
-     *
-     * The automatic-sync scheduler reads its config once at boot, so someone
-     * has to hand it the new values; the settings page is the only writer.
-     */
+    /** Notified after a configuration is persisted. */
     let configListener = null;
+
+    /**
+     * The operation currently running, or `null`.
+     *
+     * The settings page polls this while an action is in flight so a sync of
+     * thirty sessions can show what it is doing instead of a spinner that never
+     * explains itself. Stages are coarse on purpose: they map to the four
+     * things a user can wait on (fetch, compare, transfer, publish).
+     */
+    let progress = null;
 
     /** Serialize every mutating operation. */
     function exclusive(task) {
@@ -194,6 +199,22 @@ export function createEngine(options) {
         return stdout.trim() !== '';
     }
 
+    /**
+     * Whether a *local* ref for the branch exists, without touching the network.
+     *
+     * `peek` uses this: the settings page only needs to know what the last
+     * fetch left behind, and a `ls-remote` against GitHub costs seconds.
+     */
+    async function hasLocalBranchRef(config) {
+        try {
+            await git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${config.branch}`], config);
+            return true;
+        }
+        catch {
+            return false;
+        }
+    }
+
     /** Fetch the configured branch; returns false when it does not exist yet. */
     async function fetchBranch(config) {
         const hasBranch = await remoteHasBranch(config);
@@ -260,8 +281,10 @@ export function createEngine(options) {
     }
 
     /** Session entries of the fetched branch, keyed by session id. */
-    async function remoteTree(config) {
-        const hasBranch = await remoteHasBranch(config).catch(() => false);
+    async function remoteTree(config, offline = false) {
+        const hasBranch = offline
+            ? await hasLocalBranchRef(config)
+            : await remoteHasBranch(config).catch(() => false);
         if (!hasBranch)
             return new Map();
         const ref = `origin/${config.branch}`;
@@ -373,8 +396,9 @@ export function createEngine(options) {
     /** Build the plan shared by diff, sync, backup and restore. */
     async function buildPlan(config, state, input = {}) {
         const decisions = input.resolve !== null && typeof input.resolve === 'object' ? input.resolve : undefined;
+        const offline = input.offline === true;
         const local = await scanLocal(config);
-        const remote = await remoteTree(config);
+        const remote = await remoteTree(config, offline);
         const loaded = await loadRemoteBaseline(config, state);
         const remoteBaseline = loaded.baseline;
         const localBaseline = state.baseline ?? {};
@@ -905,8 +929,11 @@ export function createEngine(options) {
 
     /** Wrap an operation: serialize, record the outcome, normalize errors. */
     async function operation(name, task) {
-        const state = await loadState(paths);
+        // Set before the first `await` so a poller that starts in the same tick
+        // as the click already sees the operation.
+        progress = { operation: name, stage: 'starting', done: 0, total: 0, startedAt: Date.now() };
         try {
+            const state = await loadState(paths);
             const value = await exclusive(task);
             await record(state, name, { ok: true, ...(value.summary ?? {}) });
             logger.info(`${TITLE_ZH} ${name} 完成 / finished`, value.summary);
@@ -914,10 +941,27 @@ export function createEngine(options) {
         }
         catch (error) {
             const syncError = toSyncError(error);
-            await record(state, name, { ok: false, error: syncError.message });
+            try {
+                await record(await loadState(paths), name, { ok: false, error: syncError.message });
+            }
+            catch {
+                // Recording the failure must not mask the failure itself.
+            }
             logger.error(`${TITLE_ZH} ${name} 失败 / failed: ${syncError.message}`);
             throw syncError;
         }
+        finally {
+            progress = null;
+        }
+    }
+
+    /** Advance the progress marker the settings page polls. */
+    function stage(name, extra = {}) {
+        if (progress === null)
+            return;
+        progress.stage = name;
+        progress.at = Date.now();
+        Object.assign(progress, extra);
     }
 
     /** Check out the configured branch, creating it when it is empty. */
@@ -1064,14 +1108,50 @@ export function createEngine(options) {
             if (config.repoUrl === '')
                 throw new SyncError('not-configured', '尚未填写 Git 仓库地址 / no repository configured yet');
             const state = await loadState(paths);
-            const plan = await exclusive(async () => {
-                await ensureRepo(config);
-                await fetchBranch(config);
-                return buildPlan(config, state);
-            });
+            progress = { operation: 'diff', stage: 'fetching', done: 0, total: 0, startedAt: Date.now() };
+            try {
+                const plan = await exclusive(async () => {
+                    await ensureRepo(config);
+                    await fetchBranch(config);
+                    stage('planning');
+                    return buildPlan(config, state);
+                });
+                return {
+                    counts: plan.counts,
+                    rows: plan.rows.map(row => ({
+                        sessionId: row.sessionId,
+                        workspace: row.workspaceTitle ?? row.workspaceKey,
+                        action: row.action,
+                        reason: row.reason,
+                        localSize: row.localSize,
+                        remoteSize: row.remoteSize,
+                        createdAt: row.createdAt === null ? null : new Date(row.createdAt).toISOString(),
+                    })),
+                };
+            }
+            finally {
+                progress = null;
+            }
+        },
+
+        /**
+         * The read-only half of `diff`: compare against whatever the repository
+         * already knows locally, without contacting the remote.
+         *
+         * The settings page calls this right after a save: a full `diff` blocks
+         * on `git fetch` (seconds against GitHub), and the panel must not
+         * freeze to prove the configuration was stored.
+         */
+        async peek() {
+            const config = await loadConfig(paths);
+            if (config.repoUrl === '')
+                throw new SyncError('not-configured', '尚未填写 Git 仓库地址 / no repository configured yet');
+            const state = await loadState(paths);
+            const plan = await buildPlan(config, state, { offline: true });
             return {
                 counts: plan.counts,
-                rows: plan.rows.map(row => ({
+                stale: true,
+                rows: plan.rows.slice(0, 200).map(row => ({
                     sessionId: row.sessionId,
                     workspace: row.workspaceTitle ?? row.workspaceKey,
                     action: row.action,
@@ -1083,98 +1163,147 @@ export function createEngine(options) {
             };
         },
 
+        /** The operation in flight, for the progress bar. */
+        getProgress() {
+            if (progress === null)
+                return { running: false };
+            return {
+                running: true,
+                operation: progress.operation,
+                stage: progress.stage,
+                done: progress.done ?? 0,
+                total: progress.total ?? 0,
+                elapsedMs: Date.now() - progress.startedAt,
+            };
+        },
+
         /** Two-way sync: pull what is safe, push what is local, stop on conflict. */
         async sync(input = {}) {
-            const config = await loadConfig(paths);
-            if (config.repoUrl === '')
-                throw new SyncError('not-configured', '尚未填写 Git 仓库地址 / no repository configured yet');
-            const options = input ?? {};
-            const pending = await loadState(paths);
-            const state = pending;
-            await ensureRepo(config);
-            await checkoutBranch(config);
-            const plan = await buildPlan(config, state, options);
-            if (plan.counts.conflict > 0 && options.allowConflicts !== true) {
-                state.pendingConflict = {
-                    at: new Date().toISOString(),
-                    sessions: plan.rows.filter(row => row.action === 'conflict').map(row => row.sessionId).slice(0, 50),
-                };
+            // Claim the progress slot before any `await`, so a poller that
+            // starts in the same tick as the click already sees the operation.
+            progress = { operation: 'sync', stage: 'starting', done: 0, total: 0, startedAt: Date.now() };
+            try {
+                const config = await loadConfig(paths);
+                if (config.repoUrl === '')
+                    throw new SyncError('not-configured', '尚未填写 Git 仓库地址 / no repository configured yet');
+                const options = input ?? {};
+                const state = await loadState(paths);
+                stage('fetching');
+                await ensureRepo(config);
+                await checkoutBranch(config);
+                stage('planning');
+                const plan = await buildPlan(config, state, options);
+                if (plan.counts.conflict > 0 && options.allowConflicts !== true) {
+                    state.pendingConflict = {
+                        at: new Date().toISOString(),
+                        sessions: plan.rows.filter(row => row.action === 'conflict').map(row => row.sessionId).slice(0, 50),
+                    };
+                    await saveState(paths, state);
+                    const message = `有 ${plan.counts.conflict} 个会话两边都改了，需要你选择保留哪一边 / ${plan.counts.conflict} conflicting sessions need a decision`;
+                    throw new SyncError('conflict-present', message, {
+                        plan: {
+                            counts: plan.counts,
+                            rows: plan.rows.filter(row => row.action === 'conflict').slice(0, 50)
+                                .map(row => ({ sessionId: row.sessionId, workspace: row.workspaceTitle ?? row.workspaceKey })),
+                        },
+                    });
+                }
+                stage('transferring', { done: 0, total: plan.counts.push + plan.counts.pull + plan.counts.fork });
+                const applied = await exclusive(async () => applyPlan(config, state, plan, 'sync'));
+                stage('publishing');
+                await updateBaseline(state, plan);
+                await refreshBaselineBytes(config, plan).catch(() => undefined);
+                state.pendingConflict = null;
                 await saveState(paths, state);
-                const message = `有 ${plan.counts.conflict} 个会话两边都改了，需要你选择保留哪一边 / ${plan.counts.conflict} conflicting sessions need a decision`;
-                throw new SyncError('conflict-present', message, {
-                    plan: {
-                        counts: plan.counts,
-                        rows: plan.rows.filter(row => row.action === 'conflict').slice(0, 50)
-                            .map(row => ({ sessionId: row.sessionId, workspace: row.workspaceTitle ?? row.workspaceKey })),
-                    },
-                });
-            }
-            const applied = await exclusive(async () => applyPlan(config, state, plan, 'sync'));
-            await updateBaseline(state, plan);
-            await refreshBaselineBytes(config, plan).catch(() => undefined);
-            state.pendingConflict = null;
-            await saveState(paths, state);
-            await record(state, 'sync', {
-                ok: plan.counts.conflict === 0,
-                pulled: applied.pulled.length,
-                pushed: applied.pushed.length,
-                conflicts: plan.counts.conflict,
-                skipped: plan.counts.skipped,
-                commit: applied.commit,
-            });
-            return {
-                summary: {
+                await record(state, 'sync', {
                     ok: plan.counts.conflict === 0,
                     pulled: applied.pulled.length,
                     pushed: applied.pushed.length,
-                    forked: applied.forked.length,
                     conflicts: plan.counts.conflict,
                     skipped: plan.counts.skipped,
                     commit: applied.commit,
-                },
-                counts: plan.counts,
-                ...applied,
-                error: plan.counts.conflict > 0 ? `${plan.counts.conflict} 个冲突未处理 / ${plan.counts.conflict} conflicts left` : undefined,
-            };
+                });
+                return {
+                    summary: {
+                        ok: plan.counts.conflict === 0,
+                        pulled: applied.pulled.length,
+                        pushed: applied.pushed.length,
+                        forked: applied.forked.length,
+                        conflicts: plan.counts.conflict,
+                        skipped: plan.counts.skipped,
+                        commit: applied.commit,
+                    },
+                    counts: plan.counts,
+                    ...applied,
+                    error: plan.counts.conflict > 0 ? `${plan.counts.conflict} 个冲突未处理 / ${plan.counts.conflict} conflicts left` : undefined,
+                };
+            }
+            finally {
+                progress = null;
+            }
         },
 
         /** Upload-only sync. */
         async backup(input = {}) {
-            const config = await loadConfig(paths);
-            const narrowed = { ...config, pullEnabled: false, allowOverwrite: false };
-            return operation('backup', async () => {
+            // Claim the progress slot synchronously: a poller starts in the same
+            // tick as the click, and `loadConfig` below would otherwise yield
+            // first, leaving the panel with nothing to show.
+            progress = { operation: 'backup', stage: 'starting', done: 0, total: 0, startedAt: Date.now() };
+            try {
+                const config = await loadConfig(paths);
+                const narrowed = { ...config, pullEnabled: false, allowOverwrite: false };
                 const state = await loadState(paths);
+                stage('fetching');
                 await ensureRepo(narrowed);
                 await fetchBranch(narrowed);
+                stage('planning');
                 const plan = await buildPlan(narrowed, state, input);
+                stage('transferring', { done: 0, total: plan.counts.push });
                 const applied = await applyPlan(narrowed, state, plan, 'backup');
+                stage('publishing');
                 await updateBaseline(state, plan);
-            await refreshBaselineBytes(config, plan).catch(() => undefined);
+                await refreshBaselineBytes(config, plan).catch(() => undefined);
                 await saveState(paths, state);
-                return {
+                const value = {
                     summary: { ok: true, pushed: applied.pushed.length, commit: applied.commit },
                     counts: plan.counts,
                     ...applied,
                 };
-            });
+                await record(state, 'backup', { ok: true, ...value.summary });
+                logger.info(`${TITLE_ZH} backup 完成 / finished`, value.summary);
+                return value;
+            }
+            catch (error) {
+                const syncError = toSyncError(error);
+                logger.error(`${TITLE_ZH} backup 失败 / failed: ${syncError.message}`);
+                throw syncError;
+            }
+            finally {
+                progress = null;
+            }
         },
 
         /** Download-only sync; replaces locally changed logs after a backup. */
         async restore(input = {}) {
-            const config = await loadConfig(paths);
-            const narrowed = { ...config, pushEnabled: false, allowOverwrite: true };
-            return operation('restore', async () => {
+            progress = { operation: 'restore', stage: 'starting', done: 0, total: 0, startedAt: Date.now() };
+            try {
+                const config = await loadConfig(paths);
+                const narrowed = { ...config, pushEnabled: false, allowOverwrite: true };
                 const state = await loadState(paths);
+                stage('fetching');
                 await ensureRepo(narrowed);
                 const hasBranch = await fetchBranch(narrowed);
                 if (!hasBranch)
                     throw new SyncError('not-found', `分支 ${config.branch} 在仓库中不存在 / branch does not exist in the repository`);
+                stage('planning');
                 const plan = await buildPlan(narrowed, state, input);
+                stage('transferring', { done: 0, total: plan.counts.pull + plan.counts.fork });
                 const applied = await applyPlan(narrowed, state, plan, 'restore');
+                stage('publishing');
                 await updateBaseline(state, plan);
-            await refreshBaselineBytes(config, plan).catch(() => undefined);
+                await refreshBaselineBytes(config, plan).catch(() => undefined);
                 await saveState(paths, state);
-                return {
+                const value = {
                     summary: {
                         ok: plan.counts.conflict === 0,
                         pulled: applied.pulled.length,
@@ -1186,30 +1315,48 @@ export function createEngine(options) {
                     ...applied,
                     error: plan.counts.conflict > 0 ? `${plan.counts.conflict} 个冲突未处理 / ${plan.counts.conflict} conflicts left` : undefined,
                 };
-            });
+                await record(state, 'restore', { ok: true, ...value.summary });
+                logger.info(`${TITLE_ZH} restore 完成 / finished`, value.summary);
+                return value;
+            }
+            catch (error) {
+                const syncError = toSyncError(error);
+                logger.error(`${TITLE_ZH} restore 失败 / failed: ${syncError.message}`);
+                throw syncError;
+            }
+            finally {
+                progress = null;
+            }
         },
 
         /** Recent commits of the backup branch. */
         async history(input = {}) {
-            const config = await loadConfig(paths);
-            if (config.repoUrl === '')
-                throw new SyncError('not-configured', '尚未填写 Git 仓库地址 / no repository configured yet');
-            const limit = Math.max(1, Math.min(200, Number(input.limit) || 20));
-            const stdout = await exclusive(async () => {
-                await ensureRepo(config);
-                await fetchBranch(config);
-                try {
-                    return (await git(['log', `--max-count=${limit}`, '--date=iso-strict', '--pretty=format:%H%x1f%ad%x1f%s%x1e', `origin/${config.branch}`], config)).stdout;
-                }
-                catch {
-                    return '';
-                }
-            });
-            const entries = stdout.split('\x1e').map(line => line.trim()).filter(Boolean).map(line => {
-                const [hash, date, subject] = line.split('\x1f');
-                return { hash, date, subject };
-            });
-            return { count: entries.length, entries };
+            progress = { operation: 'history', stage: 'fetching', done: 0, total: 0, startedAt: Date.now() };
+            try {
+                const config = await loadConfig(paths);
+                if (config.repoUrl === '')
+                    throw new SyncError('not-configured', '尚未填写 Git 仓库地址 / no repository configured yet');
+                const limit = Math.max(1, Math.min(200, Number(input.limit) || 20));
+                const stdout = await exclusive(async () => {
+                    await ensureRepo(config);
+                    await fetchBranch(config);
+                    stage('reading');
+                    try {
+                        return (await git(['log', `--max-count=${limit}`, '--date=iso-strict', '--pretty=format:%H%x1f%ad%x1f%s%x1e', `origin/${config.branch}`], config)).stdout;
+                    }
+                    catch {
+                        return '';
+                    }
+                });
+                const entries = stdout.split('\x1e').map(line => line.trim()).filter(Boolean).map(line => {
+                    const [hash, date, subject] = line.split('\x1f');
+                    return { hash, date, subject };
+                });
+                return { count: entries.length, entries };
+            }
+            finally {
+                progress = null;
+            }
         },
 
         /** The most recent log entries. */

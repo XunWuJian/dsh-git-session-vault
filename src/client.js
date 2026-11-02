@@ -15,6 +15,14 @@ import * as React from 'react';
 const PREFIX = '/api/dsh-git-session-vault';
 /** One request may wait this long before it is reported as a timeout. */
 const REQUEST_TIMEOUT_MS = 30_000;
+/**
+ * Mutating actions shell out to git against the user's remote, so a sync of a
+ * few hundred sessions over a slow link legitimately runs for minutes. The
+ * panel shows the stage while it waits instead of aborting it.
+ */
+const ACTION_TIMEOUT_MS = 15 * 60_000;
+/** How often the progress bar re-reads the host's current stage. */
+const PROGRESS_POLL_MS = 700;
 
 /**
  * Strings used by the panel. The host also ships `locale/*.json` for the
@@ -66,6 +74,15 @@ const zh = {
     actionRestore: '仅下载恢复',
     actionHistory: '查看历史',
     running: '正在执行…',
+    stageFetching: '正在连接仓库…',
+    stagePlanning: '正在比较本地与远端…',
+    stageTransferring: '正在传输会话…',
+    stagePublishing: '正在提交…',
+    stageReading: '正在读取提交记录…',
+    progressElapsed: '已用 {seconds} 秒',
+    historyEmpty: '仓库里还没有提交记录。',
+    historyCount: '最近 {count} 次提交',
+    peekStale: '本地比较，未联网刷新',
     sectionConflict: '需要决定',
     conflictHint: '下列会话在两边都被修改过。选择保留哪一边，然后再次同步。',
     keepLocal: '保留本地',
@@ -138,6 +155,15 @@ const en = {
     actionRestore: 'Download only',
     actionHistory: 'Show history',
     running: 'Working…',
+    stageFetching: 'Contacting the repository…',
+    stagePlanning: 'Comparing local and remote…',
+    stageTransferring: 'Transferring sessions…',
+    stagePublishing: 'Committing…',
+    stageReading: 'Reading commits…',
+    progressElapsed: '{seconds}s elapsed',
+    historyEmpty: 'The repository has no commits yet.',
+    historyCount: 'Last {count} commits',
+    peekStale: 'Compared locally, not refreshed from the remote',
     sectionConflict: 'Needs a decision',
     conflictHint: 'These sessions changed on both sides. Choose which side to keep, then sync again.',
     keepLocal: 'Keep local',
@@ -197,12 +223,14 @@ class ApiError extends Error {
 }
 
 /** POST one route and unwrap the `{ok, value}` envelope. */
-async function request(route, body = {}) {
+async function request(route, body = {}, options = {}) {
+    const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : REQUEST_TIMEOUT_MS;
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
     let response;
     try {
-        response = await fetch(`${PREFIX}/${route}`, {
+        // `fetch` first so a network failure is not reported as a timeout.
+        response = fetch(`${PREFIX}/${route}`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify(body ?? {}),
@@ -211,8 +239,20 @@ async function request(route, body = {}) {
         });
     }
     catch (error) {
+        window.clearTimeout(timer);
+        throw new ApiError('network', String(error));
+    }
+    try {
+        response = await response;
+    }
+    catch (error) {
         const aborted = controller.signal.aborted;
-        throw new ApiError(aborted ? 'timeout' : 'network', aborted ? '请求超时 / request timed out' : String(error));
+        throw new ApiError(
+            aborted ? 'timeout' : 'network',
+            aborted
+                ? `请求超时（${Math.round(timeoutMs / 1000)} 秒）/ request timed out`
+                : String(error?.message ?? error),
+        );
     }
     finally {
         window.clearTimeout(timer);
@@ -262,19 +302,37 @@ function shortCommit(hash) {
 }
 
 const styles = {
-    page: { display: 'flex', flexDirection: 'column', gap: '20px', padding: '4px 2px 32px' },
-    intro: { margin: 0, lineHeight: 1.6, color: 'var(--dsw-alias-text-secondary, #6b7280)' },
+    page: { display: 'flex', flexDirection: 'column', gap: '16px', padding: '4px 2px 32px' },
+    pageTitle: { margin: 0, fontSize: '19px', fontWeight: 650, letterSpacing: '-0.01em' },
+    intro: { margin: 0, fontSize: '13px', lineHeight: 1.65, color: 'var(--dsw-alias-text-secondary, #6b7280)' },
     card: {
         border: '1px solid var(--dsw-alias-border, rgba(0,0,0,0.10))',
         borderRadius: '12px',
         padding: '16px 18px',
+        // A hair of elevation so sections separate without a heavy frame.
         background: 'var(--dsw-alias-surface, transparent)',
+        boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
         display: 'flex',
         flexDirection: 'column',
         gap: '12px',
     },
-    cardTitle: { margin: 0, fontSize: '14px', fontWeight: 600 },
-    hint: { margin: 0, fontSize: '12px', lineHeight: 1.5, color: 'var(--dsw-alias-text-secondary, #6b7280)' },
+    cardTitle: {
+        margin: 0,
+        fontSize: '13px',
+        fontWeight: 650,
+        letterSpacing: '0.02em',
+        textTransform: 'uppercase',
+        color: 'var(--dsw-alias-text-secondary, #6b7280)',
+    },
+    hint: { margin: 0, fontSize: '12px', lineHeight: 1.55, color: 'var(--dsw-alias-text-secondary, #6b7280)' },
+    /** A heading subdividing one card, so it is not the same weight as the card title. */
+    subTitle: {
+        margin: '4px 0 0',
+        paddingTop: '12px',
+        fontSize: '13px',
+        fontWeight: 600,
+        borderTop: '1px solid var(--dsw-alias-border, rgba(0,0,0,0.08))',
+    },
     row: { display: 'flex', flexWrap: 'wrap', gap: '12px' },
     field: { display: 'flex', flexDirection: 'column', gap: '6px', flex: '1 1 220px', minWidth: 0 },
     label: { fontSize: '12px', fontWeight: 500 },
@@ -305,6 +363,7 @@ const styles = {
         border: '1px solid var(--dsw-alias-border, rgba(0,0,0,0.16))',
         background: 'var(--dsw-alias-surface-raised, rgba(0,0,0,0.04))',
         color: 'var(--dsw-alias-text, inherit)',
+        transition: 'background 120ms ease, border-color 120ms ease, opacity 120ms ease',
     },
     primary: {
         padding: '7px 14px',
@@ -315,41 +374,147 @@ const styles = {
         border: '1px solid transparent',
         background: 'var(--dsw-alias-accent, #2563eb)',
         color: 'var(--dsw-alias-accent-text, #fff)',
+        transition: 'filter 120ms ease, opacity 120ms ease',
     },
-    grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px' },
-    stat: { display: 'flex', flexDirection: 'column', gap: '2px' },
-    statLabel: { fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--dsw-alias-text-secondary, #6b7280)' },
-    statValue: { fontSize: '15px', fontWeight: 600 },
-    table: { width: '100%', borderCollapse: 'collapse', fontSize: '12px' },
-    th: {
-        textAlign: 'left',
-        padding: '6px 8px',
-        borderBottom: '1px solid var(--dsw-alias-border, rgba(0,0,0,0.10))',
+    grid: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+        gap: '10px',
+    },
+    stat: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '3px',
+        padding: '10px 12px',
+        borderRadius: '9px',
+        background: 'var(--dsw-alias-surface-sunken, rgba(0,0,0,0.03))',
+        minWidth: 0,
+    },
+    statLabel: {
+        fontSize: '10px',
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        fontWeight: 600,
         color: 'var(--dsw-alias-text-secondary, #6b7280)',
-        fontWeight: 500,
+    },
+    statValue: {
+        fontSize: '14px',
+        fontWeight: 600,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
     },
-    td: { padding: '6px 8px', borderBottom: '1px solid var(--dsw-alias-border, rgba(0,0,0,0.06))', verticalAlign: 'top' },
+    table: { width: '100%', borderCollapse: 'collapse', fontSize: '12px', fontVariantNumeric: 'tabular-nums' },
+    th: {
+        textAlign: 'left',
+        padding: '7px 8px',
+        borderBottom: '1px solid var(--dsw-alias-border, rgba(0,0,0,0.12))',
+        color: 'var(--dsw-alias-text-secondary, #6b7280)',
+        fontWeight: 600,
+        fontSize: '11px',
+        textTransform: 'uppercase',
+        letterSpacing: '0.03em',
+        whiteSpace: 'nowrap',
+    },
+    td: { padding: '7px 8px', borderBottom: '1px solid var(--dsw-alias-border, rgba(0,0,0,0.06))', verticalAlign: 'top' },
     mono: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '11px' },
     notice: { margin: 0, fontSize: '12px', lineHeight: 1.5 },
     ok: { color: 'var(--dsw-alias-success, #15803d)' },
     error: { color: 'var(--dsw-alias-danger, #b91c1c)' },
     pill: {
         display: 'inline-block',
-        padding: '1px 8px',
+        padding: '2px 8px',
         borderRadius: '999px',
         fontSize: '11px',
+        fontWeight: 500,
         border: '1px solid var(--dsw-alias-border, rgba(0,0,0,0.16))',
         whiteSpace: 'nowrap',
     },
+    pillPush: { background: 'rgba(37,99,235,0.10)', borderColor: 'rgba(37,99,235,0.35)', color: 'var(--dsw-alias-accent, #2563eb)' },
+    pillPull: { background: 'rgba(21,128,61,0.10)', borderColor: 'rgba(21,128,61,0.35)', color: 'var(--dsw-alias-success, #15803d)' },
+    pillConflict: { background: 'rgba(185,28,28,0.10)', borderColor: 'rgba(185,28,28,0.35)', color: 'var(--dsw-alias-danger, #b91c1c)' },
+    pillIdle: { color: 'var(--dsw-alias-text-secondary, #6b7280)' },
+    /** Applied to a button whose action is currently running. */
+    buttonBusy: { opacity: 0.72, cursor: 'progress' },
     checkboxRow: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' },
+    progressWrap: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '6px',
+        marginTop: '10px',
+        padding: '10px 12px',
+        borderRadius: '10px',
+        border: '1px solid var(--dsw-alias-border, rgba(0,0,0,0.10))',
+        background: 'var(--dsw-alias-surface-sunken, rgba(0,0,0,0.03))',
+    },
+    progressHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px', fontSize: '12px' },
+    progressStage: { fontWeight: 600 },
+    progressElapsed: { color: 'var(--dsw-alias-text-secondary, #6b7280)', fontVariantNumeric: 'tabular-nums' },
+    progressTrack: {
+        height: '6px',
+        borderRadius: '999px',
+        overflow: 'hidden',
+        background: 'var(--dsw-alias-border, rgba(0,0,0,0.12))',
+    },
+    progressBar: {
+        height: '100%',
+        borderRadius: '999px',
+        background: 'var(--dsw-alias-accent, #2563eb)',
+        // Indeterminate: the host reports stages, not a percentage, so the bar
+        // sweeps instead of inventing a number it cannot back up.
+        transition: 'width 240ms ease-out',
+    },
+    noticeBox: {
+        margin: 0,
+        padding: '9px 12px',
+        borderRadius: '10px',
+        fontSize: '12px',
+        lineHeight: 1.5,
+    },
+    spinner: {
+        display: 'inline-block',
+        width: '11px',
+        height: '11px',
+        marginRight: '7px',
+        borderRadius: '50%',
+        border: '2px solid currentColor',
+        borderTopColor: 'transparent',
+        animation: 'dsh-vault-spin 0.7s linear infinite',
+        verticalAlign: '-1px',
+    },
 };
+
+/**
+ * Style one `action` pill by what it means.
+ *
+ * The raw values are the host's (`push` / `pull` / `conflict` / `skip`), which
+ * read fine but all looked identical before: a red-coded conflict was
+ * indistinguishable from an ordinary skip.
+ */
+function actionPillStyle(action) {
+    if (action === 'push')
+        return { ...styles.pill, ...styles.pillPush };
+    if (action === 'pull' || action === 'fork')
+        return { ...styles.pill, ...styles.pillPull };
+    if (action === 'conflict')
+        return { ...styles.pill, ...styles.pillConflict };
+    return { ...styles.pill, ...styles.pillIdle };
+}
+
+/** The style for a button in the given busy state. */
+function buttonStyle(busyNow, primary) {
+    const base = primary ? styles.primary : styles.button;
+    return busyNow ? { ...base, ...styles.buttonBusy } : base;
+}
 
 const h = React.createElement;
 
 /** A labelled text input. */
-function Field({ label, hint, children }) {
-    return h('div', { style: styles.field },
+function Field({ label, hint, children, compact }) {
+    const fieldStyle = compact
+        ? { ...styles.field, flex: '0 0 auto', width: '160px' }
+        : styles.field;
+    return h('div', { style: fieldStyle },
         h('span', { style: styles.label }, label),
         children,
         hint !== undefined && hint !== null ? h('span', { style: styles.hint }, hint) : null);
@@ -362,6 +527,45 @@ function Check({ label, checked, onChange, hint }) {
             h('input', { type: 'checkbox', checked: Boolean(checked), onChange: event => onChange(event.target.checked) }),
             h('span', null, label)),
         hint !== undefined && hint !== null ? h('span', { style: styles.hint }, hint) : null);
+}
+
+/** The stage of a running action, so a long sync never looks like a hang. */
+function Progress({ t, value }) {
+    if (value === null || value === undefined || value.running === false)
+        return null;
+    const stageKey = `stage${String(value.stage ?? 'starting').replace(/^./, character => character.toUpperCase())}`;
+    const label = t(stageKey) === stageKey ? t('running') : t(stageKey);
+    const elapsed = Math.max(0, Math.round((Number(value.elapsedMs) || 0) / 1000));
+    return h('div', { style: styles.progressWrap, role: 'status', 'aria-live': 'polite' },
+        h('div', { style: styles.progressHead },
+            h('span', { style: styles.progressStage }, label),
+            h('span', { style: styles.progressElapsed }, t('progressElapsed', { seconds: elapsed }))),
+        h('div', { style: styles.progressTrack },
+            h('div', {
+                style: {
+                    ...styles.progressBar,
+                    width: '100%',
+                    opacity: 0.55,
+                    animation: 'dsh-vault-pulse 1.4s ease-in-out infinite',
+                },
+            })));
+}
+
+/** Inline animation keyframes; the shell offers no stylesheet hook for plugins. */
+const ANIMATION_ID = 'dsh-git-session-vault-animations';
+function ensureAnimations() {
+    if (typeof document === 'undefined' || document.getElementById(ANIMATION_ID) !== null)
+        return;
+    const style = document.createElement('style');
+    style.id = ANIMATION_ID;
+    style.textContent = `
+@keyframes dsh-vault-spin { to { transform: rotate(360deg); } }
+@keyframes dsh-vault-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.75; } }
+@media (prefers-reduced-motion: reduce) {
+  @keyframes dsh-vault-spin { to { transform: none; } }
+  @keyframes dsh-vault-pulse { 0%, 100% { opacity: 0.55; } }
+}`;
+    document.head.appendChild(style);
 }
 
 /** Coerce a stored configuration into the shape the form edits. */
@@ -382,6 +586,23 @@ function toForm(config) {
     };
 }
 
+/**
+ * Style one notice banner.
+ *
+ * Errors were previously rendered as bare red text with no box, which read as
+ * an unrelated line of prose rather than as the outcome of the button that was
+ * just pressed.
+ */
+function noticeStyle(notice) {
+    const kind = notice?.kind ?? 'ok';
+    const tint = kind === 'error'
+        ? { border: '1px solid var(--dsw-alias-danger, #b91c1c)', color: 'var(--dsw-alias-danger, #b91c1c)' }
+        : kind === 'warn'
+            ? { border: '1px solid var(--dsw-alias-warning, #b45309)', color: 'var(--dsw-alias-warning, #b45309)' }
+            : { border: '1px solid var(--dsw-alias-success, #15803d)', color: 'var(--dsw-alias-success, #15803d)' };
+    return { ...styles.noticeBox, ...tint };
+}
+
 /** The settings page itself. */
 function Page({ t }) {
     const [config, setConfig] = React.useState(null);
@@ -392,12 +613,22 @@ function Page({ t }) {
     const [busy, setBusy] = React.useState('');
     const [notice, setNotice] = React.useState(null);
     const [resolution, setResolution] = React.useState({});
+    /** Current stage of the running action, polled from the host. */
+    const [progress, setProgress] = React.useState(null);
+    /** Set while a full remote comparison is running, to show it is not frozen. */
+    const [comparing, setComparing] = React.useState(false);
     const alive = React.useRef(true);
+    /** Set while a progress poll loop owns the interval. */
+    const pollRef = React.useRef(null);
 
     React.useEffect(() => {
         alive.current = true;
         return () => {
             alive.current = false;
+            if (pollRef.current !== null) {
+                window.clearInterval(pollRef.current);
+                pollRef.current = null;
+            }
         };
     }, []);
 
@@ -405,7 +636,43 @@ function Page({ t }) {
         setForm(current => ({ ...current, ...patch }));
     }, []);
 
-    /** Reload status (which carries the saved configuration) and the comparison. */
+    /** Stop polling the host for a stage. */
+    const stopPolling = React.useCallback(() => {
+        if (pollRef.current !== null) {
+            window.clearInterval(pollRef.current);
+            pollRef.current = null;
+        }
+        setProgress(null);
+    }, []);
+
+    /** Start polling the host for the stage of the action just launched. */
+    const startPolling = React.useCallback(operation => {
+        stopPolling();
+        setProgress({ running: true, operation, stage: 'starting', done: 0, total: 0, elapsedMs: 0 });
+        pollRef.current = window.setInterval(() => {
+            request('progress', {})
+                .then(value => {
+                    if (!alive.current)
+                        return;
+                    if (value?.running === false) {
+                        setProgress(current => (current === null ? current : { ...current, stage: 'finishing' }));
+                        return;
+                    }
+                    setProgress(value ?? null);
+                })
+                .catch(() => undefined);
+        }, PROGRESS_POLL_MS);
+    }, [stopPolling]);
+
+    /**
+     * Reload status, then compare.
+     *
+     * `mode: 'remote'` (the default) asks the host for a real three-way
+     * comparison, which blocks on `git fetch`. `mode: 'local'` uses `peek`,
+     * which compares against what the repository already knows locally — the
+     * right choice right after saving, where waiting seconds just to confirm a
+     * write reads as a hang.
+     */
     const refresh = React.useCallback(async (options = {}) => {
         const loaded = await request('status');
         if (!alive.current)
@@ -417,13 +684,29 @@ function Page({ t }) {
             setConfig(loaded.config);
             setForm(toForm(loaded.config));
         }
-        if (loaded?.configured === true) {
+        if (loaded?.configured !== true) {
+            if (alive.current)
+                setDiff(null);
+            return loaded;
+        }
+        const local = options.mode === 'local';
+        if (local) {
+            // Local comparison is milliseconds; no need to announce it.
+            const compared = await request('peek').catch(() => null);
+            if (alive.current)
+                setDiff(compared);
+            return loaded;
+        }
+        if (alive.current)
+            setComparing(true);
+        try {
             const compared = await request('diff').catch(() => null);
             if (alive.current)
                 setDiff(compared);
         }
-        else if (alive.current) {
-            setDiff(null);
+        finally {
+            if (alive.current)
+                setComparing(false);
         }
         return loaded;
     }, []);
@@ -448,18 +731,20 @@ function Page({ t }) {
     const run = React.useCallback(async (label, action) => {
         setBusy(label);
         setNotice(null);
+        // Mutating actions talk to the remote, so they get the long timeout
+        // and the progress bar instead of a 30 s abort.
+        startPolling(label);
         try {
             const value = await action();
             if (!alive.current)
                 return value;
             if (value !== undefined && value !== null && value.counts !== undefined) {
+                const pushed = Number(value.summary?.pushed ?? value.counts.push ?? 0);
+                const pulled = Number(value.summary?.pulled ?? value.counts.pull ?? 0);
+                const skipped = Number(value.counts.skipped ?? 0);
                 setNotice({
-                    kind: 'ok',
-                    text: value.error ?? t('actionDone', {
-                        pushed: value.counts.push ?? 0,
-                        pulled: value.counts.pull ?? 0,
-                        skipped: value.counts.skipped ?? 0,
-                    }),
+                    kind: value.error === undefined ? 'ok' : 'warn',
+                    text: value.error ?? t('actionDone', { pushed, pulled, skipped }),
                 });
             }
             await refresh();
@@ -479,10 +764,47 @@ function Page({ t }) {
             return null;
         }
         finally {
+            stopPolling();
             if (alive.current)
                 setBusy('');
         }
-    }, [refresh, t]);
+    }, [refresh, startPolling, stopPolling, t]);
+
+    /** Upload only, with the same feedback as a full sync. */
+    const backupNow = React.useCallback(() => run('backup', () => request('backup', {}, {
+        timeoutMs: ACTION_TIMEOUT_MS,
+    })), [run]);
+
+    /** Download only. */
+    const restoreNow = React.useCallback(() => run('restore', () => request('restore', {}, {
+        timeoutMs: ACTION_TIMEOUT_MS,
+    })), [run]);
+
+    /** Load the commit history and show it. */
+    const showHistory = React.useCallback(async () => {
+        setBusy('history');
+        setNotice(null);
+        startPolling('history');
+        try {
+            const value = await request('history', { limit: 20 }, { timeoutMs: ACTION_TIMEOUT_MS });
+            if (!alive.current)
+                return;
+            setHistory(value);
+            const count = Array.isArray(value?.entries) ? value.entries.length : 0;
+            setNotice(count === 0
+                ? { kind: 'warn', text: t('historyEmpty') }
+                : { kind: 'ok', text: t('historyCount', { count }) });
+        }
+        catch (error) {
+            if (alive.current)
+                setNotice({ kind: 'error', text: t('actionFailed', { message: error.message }) });
+        }
+        finally {
+            stopPolling();
+            if (alive.current)
+                setBusy('');
+        }
+    }, [startPolling, stopPolling, t]);
 
     const save = React.useCallback(async () => {
         setBusy('save');
@@ -500,6 +822,10 @@ function Page({ t }) {
                 allowOverwrite: form.allowOverwrite,
                 maxSessionMb: form.maxSessionMb,
                 autoSync: {
+                    // Without `enabled` the scheduler stays off no matter what
+                    // the two switches say, which is why arming automatic sync
+                    // from the UI appeared to do nothing.
+                    enabled: form.autoStartup || form.autoChange,
                     onStartup: form.autoStartup,
                     onSessionChange: form.autoChange,
                 },
@@ -509,7 +835,11 @@ function Page({ t }) {
             setConfig(saved);
             setForm(toForm(saved));
             setNotice({ kind: 'ok', text: t('saved') });
-            await refresh();
+            // `mode: 'local'`: confirming a write must not block on `git fetch`.
+            // The session table refreshes from the local comparison in
+            // milliseconds; a full remote comparison happens on the next sync
+            // or on the explicit refresh button.
+            await refresh({ mode: 'local' });
         }
         catch (error) {
             if (alive.current)
@@ -546,23 +876,23 @@ function Page({ t }) {
     const upload = React.useCallback(() => run('sync', () => request('sync', {
         allowConflicts: true,
         resolve: resolution,
-    })), [resolution, run]);
+    }, { timeoutMs: ACTION_TIMEOUT_MS })), [resolution, run]);
 
     const conflicts = status?.conflict?.sessions ?? [];
 
     if (status === null) {
         return h('div', { style: styles.page },
-            h('p', { style: styles.hint }, t('loading')),
-            notice !== null ? h('p', { style: { ...styles.notice, ...(notice.kind === 'error' ? styles.error : styles.ok) } }, notice.text) : null);
+            h('p', { style: styles.hint },
+                h('span', { style: styles.spinner, 'aria-hidden': 'true' }),
+                t('loading')),
+            notice !== null ? h('p', { style: noticeStyle(notice) }, notice.text) : null);
     }
 
     return h('div', { style: styles.page },
-        h('h2', { style: { margin: 0, fontSize: '18px' } }, t('title')),
+        h('h2', { style: styles.pageTitle }, t('title')),
         h('p', { style: styles.intro }, t('intro')),
 
-        notice !== null
-            ? h('p', { style: { ...styles.notice, ...(notice.kind === 'error' ? styles.error : styles.ok) } }, notice.text)
-            : null,
+        notice !== null ? h('p', { style: noticeStyle(notice) }, notice.text) : null,
 
         // Repository form.
         h('section', { style: styles.card },
@@ -611,9 +941,9 @@ function Page({ t }) {
                     }))
                 : null,
             h('div', { style: styles.buttons },
-                h('button', { type: 'button', style: styles.primary, disabled: busy !== '', onClick: save },
+                h('button', { type: 'button', style: buttonStyle(busy === 'save', true), disabled: busy !== '', onClick: save },
                     busy === 'save' ? t('saving') : t('save')),
-                h('button', { type: 'button', style: styles.button, disabled: busy !== '', onClick: test },
+                h('button', { type: 'button', style: buttonStyle(busy === 'test', false), disabled: busy !== '', onClick: test },
                     busy === 'test' ? t('testing') : t('test')))),
 
         // Status.
@@ -689,47 +1019,43 @@ function Page({ t }) {
             h('p', { style: styles.hint }, t('sectionActionsHint')),
             h('div', { style: styles.buttons },
                 h('button', {
-                    type: 'button', style: styles.primary, disabled: busy !== '' || status.configured === false,
-                    onClick: () => run('sync', () => request('sync', { resolve: resolution })),
+                    type: 'button',
+                    style: buttonStyle(busy === 'sync', true),
+                    disabled: busy !== '' || status.configured === false,
+                    onClick: () => run('sync', () => request('sync', { resolve: resolution }, { timeoutMs: ACTION_TIMEOUT_MS })),
                 }, busy === 'sync' ? t('running') : t('actionSync')),
                 h('button', {
-                    type: 'button', style: styles.button, disabled: busy !== '' || status.configured === false,
-                    onClick: () => run('backup', () => request('backup')),
+                    type: 'button',
+                    style: buttonStyle(busy === 'backup', false),
+                    disabled: busy !== '' || status.configured === false,
+                    onClick: backupNow,
                 }, busy === 'backup' ? t('running') : t('actionBackup')),
                 h('button', {
-                    type: 'button', style: styles.button, disabled: busy !== '' || status.configured === false,
-                    onClick: () => run('restore', () => request('restore')),
+                    type: 'button',
+                    style: buttonStyle(busy === 'restore', false),
+                    disabled: busy !== '' || status.configured === false,
+                    onClick: restoreNow,
                 }, busy === 'restore' ? t('running') : t('actionRestore')),
                 h('button', {
-                    type: 'button', style: styles.button, disabled: busy !== '' || status.configured === false,
-                    onClick: async () => {
-                        setBusy('history');
-                        try {
-                            const value = await request('history', { limit: 20 });
-                            if (alive.current)
-                                setHistory(value);
-                        }
-                        catch (error) {
-                            if (alive.current)
-                                setNotice({ kind: 'error', text: t('actionFailed', { message: error.message }) });
-                        }
-                        finally {
-                            if (alive.current)
-                                setBusy('');
-                        }
-                    },
-                }, t('actionHistory'))) ),
+                    type: 'button',
+                    style: buttonStyle(busy === 'history', false),
+                    disabled: busy !== '' || status.configured === false,
+                    onClick: showHistory,
+                }, busy === 'history' ? t('running') : t('actionHistory'))),
+            h(Progress, { t, value: progress })),
 
         // History.
-        history !== null && Array.isArray(history.entries) && history.entries.length > 0
+        history !== null
             ? h('section', { style: styles.card },
                 h('h3', { style: styles.cardTitle }, t('historyTitle')),
-                h('table', { style: styles.table },
-                    h('tbody', null,
-                        ...history.entries.map(entry => h('tr', { key: entry.hash },
-                            h('td', { style: { ...styles.td, ...styles.mono } }, shortCommit(entry.hash)),
-                            h('td', { style: styles.td }, formatTime(entry.date, '')),
-                            h('td', { style: styles.td }, entry.subject))))))
+                Array.isArray(history.entries) && history.entries.length > 0
+                    ? h('table', { style: styles.table },
+                        h('tbody', null,
+                            ...history.entries.map(entry => h('tr', { key: entry.hash },
+                                h('td', { style: { ...styles.td, ...styles.mono } }, shortCommit(entry.hash)),
+                                h('td', { style: styles.td }, formatTime(entry.date, '')),
+                                h('td', { style: styles.td }, entry.subject)))))
+                    : h('p', { style: styles.hint }, t('historyEmpty')))
             : null,
 
         // Options.
@@ -757,15 +1083,15 @@ function Page({ t }) {
                 checked: form.allowOverwrite,
                 onChange: value => update({ allowOverwrite: value }),
             }),
-            h(Field, { label: t('maxSessionMb') },
+            h(Field, { label: t('maxSessionMb'), compact: true },
                 h('input', {
-                    style: { ...styles.input, maxWidth: '160px' },
+                    style: styles.input,
                     type: 'number',
                     min: 0,
                     value: form.maxSessionMb,
                     onChange: event => update({ maxSessionMb: Number(event.target.value) }),
                 })),
-            h('h3', { style: styles.cardTitle }, t('autoSync')),
+            h('h3', { style: styles.subTitle }, t('autoSync')),
             h('div', { style: styles.row },
                 h(Check, {
                     label: t('autoStartup'),
@@ -778,13 +1104,18 @@ function Page({ t }) {
                     onChange: value => update({ autoChange: value }),
                 })),
             h('div', { style: styles.buttons },
-                h('button', { type: 'button', style: styles.primary, disabled: busy !== '', onClick: save },
+                h('button', { type: 'button', style: buttonStyle(busy === 'save', true), disabled: busy !== '', onClick: save },
                     busy === 'save' ? t('saving') : t('save')))),
 
         // Session table and diff actions.
         h('section', { style: styles.card },
             h('h3', { style: styles.cardTitle }, t('sectionSessions')),
             h('p', { style: styles.hint }, t('sessionsHint')),
+            comparing
+                ? h('p', { style: styles.hint },
+                    h('span', { style: styles.spinner, 'aria-hidden': 'true' }),
+                    t('stagePlanning'))
+                : null,
             Array.isArray(diff?.rows) && diff.rows.length > 0
                 ? h('table', { style: styles.table },
                     h('thead', null,
@@ -798,7 +1129,8 @@ function Page({ t }) {
                             h('td', { style: { ...styles.td, ...styles.mono } }, row.sessionId),
                             h('td', { style: styles.td }, row.workspace ?? '—'),
                             h('td', { style: styles.td },
-                                h('span', { style: styles.pill }, `${row.action}${row.reason !== undefined && row.reason !== null ? ` · ${row.reason}` : ''}`)),
+                                h('span', { style: actionPillStyle(row.action) },
+                                    `${row.action}${row.reason !== undefined && row.reason !== null ? ` · ${row.reason}` : ''}`)),
                             h('td', { style: styles.td }, formatBytes(row.localSize ?? row.remoteSize ?? 0))))),
                     diff.rows.length > 200
                         ? h('caption', { style: { ...styles.hint, textAlign: 'left', paddingTop: '8px' } },
@@ -806,9 +1138,14 @@ function Page({ t }) {
                         : null)
                 : h('p', { style: styles.hint }, t('noSessions'))),
 
-        // Manual refresh.
+        // Manual refresh: a full remote comparison, with its own indicator.
         h('div', { style: styles.buttons },
-            h('button', { type: 'button', style: styles.button, disabled: busy !== '', onClick: () => refresh() }, t('retry'))),
+            h('button', {
+                type: 'button',
+                style: buttonStyle(comparing, false),
+                disabled: busy !== '' || comparing,
+                onClick: () => refresh(),
+            }, comparing ? t('stagePlanning') : t('retry'))),
     );
 }
 
@@ -830,7 +1167,7 @@ class SectionBoundary extends React.Component {
     render() {
         if (this.state.failed) {
             return h('div', { style: styles.page },
-                h('p', { style: { ...styles.notice, ...styles.error } }, this.state.message));
+                h('p', { style: noticeStyle({ kind: 'error' }) }, this.state.message));
         }
         return this.props.children;
     }
@@ -842,6 +1179,14 @@ const inject = ['slots', 'locale', 'theme'];
 /** Register the settings page. */
 function apply(ctx) {
     let t;
+    // Keyframes for the progress sweep and the inline spinner; the shell offers
+    // plugins no stylesheet hook, so they are injected once into <head>.
+    try {
+        ensureAnimations();
+    }
+    catch {
+        // A missing document only means no animation, never a failed mount.
+    }
     try {
         ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-git-session-vault: locale dictionaries');
         t = createTranslate(ctx.locale.bind(NS));
