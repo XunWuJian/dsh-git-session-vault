@@ -77,7 +77,7 @@ const ctx = {
 
 const plugin = await import('../lib/index.js');
 assert.equal(plugin.name, 'dsh-git-session-vault', 'plugin name matches the package name');
-assert.deepEqual(plugin.inject, [], 'no hard service dependency');
+assert.deepEqual(plugin.inject, ['timer'], 'timer is a declared dependency, not an optional one');
 plugin.apply(ctx);
 
 // `apply` starts asynchronously inside an effect; give it a moment to settle.
